@@ -1,0 +1,23 @@
+name = "settle-up"
+main = "src/worker.js"
+compatibility_date = "2025-09-01"
+
+# The UI. /api/* goes to the Worker; every other path serves index.html.
+[assets]
+directory = "./public"
+binding = "ASSETS"
+not_found_handling = "single-page-application"
+run_worker_first = ["/api/*"]
+
+# One Durable Object per group keeps that group's people and gatherings.
+[[durable_objects.bindings]]
+name = "GROUPS"
+class_name = "Group"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Group"]
+
+# Secrets (set with `npx wrangler secret put NAME`, never put them in this file):
+#   SPLITWISE_API_KEY  your personal Splitwise API key
+#   ORGANIZER_PIN      a PIN you choose; needed to pull from / record into Splitwise

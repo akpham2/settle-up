@@ -1,0 +1,577 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#0e7c66">
+<title>Settle Up</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcode-generator/1.4.4/qrcode.min.js"></script>
+<style>
+  :root{--bg:#f6f5f2;--card:#fff;--ink:#1c1b19;--muted:#6d6a64;--line:#e4e1da;--accent:#0e7c66;--accent-ink:#fff;--soft:#e7f3ef;--warn:#b4471b;--warn-soft:#fff4ec;--done:#9a968d}
+  @media (prefers-color-scheme:dark){:root{--bg:#141412;--card:#1f1e1b;--ink:#f1efe9;--muted:#a29e95;--line:#34322d;--accent:#3fbf9f;--accent-ink:#0c1a16;--soft:#1d2f2a;--warn:#f08a5d;--warn-soft:#2b1d14;--done:#6e6a62}}
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif}
+  a{color:var(--accent)}
+  .wrap{max-width:560px;margin:0 auto;padding:14px 14px 90px}
+  .top{display:flex;align-items:center;gap:10px;margin:2px 0 12px}
+  .top h1{font-size:21px;margin:0;flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;letter-spacing:-.01em}
+  .back{font-size:15px;text-decoration:none;font-weight:600}
+  .tabs{display:flex;gap:6px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px;margin-bottom:14px}
+  .tabs a{flex:1;text-align:center;text-decoration:none;color:var(--muted);padding:9px 6px;border-radius:9px;font-weight:600;font-size:14px}
+  .tabs a.on{background:var(--accent);color:var(--accent-ink)}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  .card h2{font-size:16px;margin:0 0 8px}
+  label{display:block;font-size:13px;color:var(--muted);margin:10px 0 4px}
+  input,select,textarea{width:100%;font:16px inherit;font-family:inherit;color:var(--ink);background:var(--bg);border:1px solid var(--line);border-radius:10px;padding:10px 11px;outline:none}
+  input:focus,select:focus,textarea:focus{border-color:var(--accent)}
+  textarea{min-height:110px;resize:vertical}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);padding:10px 14px;border-radius:10px;font:600 14px inherit;font-family:inherit;cursor:pointer;text-decoration:none}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+  .btn.small{padding:7px 10px;font-size:13px}
+  .btn.ghost{background:transparent}
+  .btn.danger{color:var(--warn)}
+  .btn.block{width:100%}
+  .btn:disabled{opacity:.5;cursor:default}
+  .btns{display:flex;flex-wrap:wrap;gap:8px;margin-top:12px}
+  .muted{color:var(--muted);font-size:13px}
+  .row{display:flex;gap:8px;align-items:center}
+  .row>.grow{flex:1;min-width:0}
+  .list>.item{display:flex;align-items:center;gap:10px;padding:11px 0;border-top:1px solid var(--line);text-decoration:none;color:inherit}
+  .list>.item:first-child{border-top:0}
+  .item .info{flex:1;min-width:0}
+  .item .t{font-weight:600}
+  .item .s{font-size:13px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .pill{display:inline-block;font-size:11px;background:var(--soft);color:var(--accent);padding:2px 8px;border-radius:99px;font-weight:700;white-space:nowrap}
+  .pill.warn{background:var(--warn-soft);color:var(--warn)}
+  .pill.grey{background:var(--bg);color:var(--muted)}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-top:6px}
+  .seg button{flex:1;border:0;background:var(--card);color:var(--muted);padding:9px 4px;font:600 13px inherit;font-family:inherit;cursor:pointer;border-left:1px solid var(--line)}
+  .seg button:first-child{border-left:0}
+  .seg button.on{background:var(--soft);color:var(--accent)}
+  .pay{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin-bottom:12px}
+  .pay.paid{opacity:.6}
+  .pay .hd{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+  .pay .who{font-weight:700}
+  .money{font-weight:800;font-size:19px;color:var(--accent);white-space:nowrap}
+  .pay.paid .money{color:var(--done);text-decoration:line-through}
+  .qrbox{display:flex;gap:14px;align-items:center;margin-top:10px}
+  .qr{width:136px;height:136px;flex:none;background:#fff;border-radius:10px;padding:6px;cursor:zoom-in;border:1px solid var(--line)}
+  .qr svg{width:100%;height:100%;display:block}
+  .bank{font-size:14px;min-width:0}
+  .bank b{display:block;font-size:15px}
+  .bank code{font-size:15px;word-break:break-all}
+  .warnbox{background:var(--warn-soft);color:var(--warn);border-radius:10px;padding:10px;font-size:13px;margin-top:10px}
+  .infobox{background:var(--soft);border-radius:12px;padding:12px;font-size:14px;margin-bottom:12px}
+  .mini{display:flex;align-items:center;gap:8px;padding:10px 0;border-top:1px solid var(--line);font-size:14px}
+  .mini:first-child{border-top:0}
+  .mini .grow{flex:1;min-width:0}
+  .mini.paid .amt{text-decoration:line-through;color:var(--done)}
+  .amt{font-weight:700;white-space:nowrap}
+  .bal{display:flex;justify-content:space-between;font-size:14px;padding:5px 0;border-top:1px dashed var(--line)}
+  .bal:first-child{border-top:0}
+  .pos{color:var(--accent);font-weight:700}.neg{color:var(--warn);font-weight:700}
+  .overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:50;padding:20px}
+  .overlay.on{display:flex}
+  .overlay .big{background:#fff;padding:16px;border-radius:16px;width:min(86vw,420px);aspect-ratio:1}
+  .overlay .big svg{width:100%;height:100%}
+  .overlay .cap{color:#fff;text-align:center;margin-top:14px;font-size:15px}
+  .overlay .cap b{font-size:22px;display:block}
+  .modal{position:fixed;inset:0;background:rgba(0,0,0,.5);display:none;align-items:flex-end;justify-content:center;z-index:40}
+  .modal.on{display:flex}
+  .sheet{background:var(--card);width:100%;max-width:560px;border-radius:18px 18px 0 0;padding:16px 14px 24px;max-height:92vh;overflow:auto}
+  .sheet h2{margin:0 0 6px;font-size:17px}
+  .toast{position:fixed;left:50%;bottom:22px;transform:translateX(-50%) translateY(20px);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;opacity:0;transition:.2s;pointer-events:none;z-index:60;max-width:90vw;text-align:center}
+  .toast.on{opacity:1;transform:translateX(-50%) translateY(0)}
+  .empty{text-align:center;color:var(--muted);padding:16px 6px;font-size:14px}
+  .hero{text-align:center;padding:28px 6px 10px}
+  .hero h1{font-size:28px;margin:0 0 6px}
+  .sec{font-size:13px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.05em;margin:18px 2px 8px}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"><div class="empty">Loading…</div></div>
+
+<div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
+<div class="overlay" id="overlay"><div class="big" id="bigQr"></div><div class="cap" id="bigCap"></div><div class="cap" style="color:#bbb;font-size:13px">Tap anywhere to close</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+/* =========================================================
+   Basics
+   ========================================================= */
+const BANKS=[["Techcombank","970407"],["Vietcombank","970436"],["VietinBank","970415"],["BIDV","970418"],["Agribank","970405"],["MB Bank","970422"],["ACB","970416"],["VPBank","970432"],["TPBank","970423"],["Sacombank","970403"],["VIB","970441"],["SHB","970443"],["HDBank","970437"],["SeABank","970440"],["OCB","970448"],["MSB","970426"],["Eximbank","970431"],["LPBank","970449"],["Nam A Bank","970428"],["ABBANK","970425"],["Bac A Bank","970409"],["BVBank (Viet Capital)","970454"],["Kienlongbank","970452"],["PVcomBank","970412"],["Saigonbank","970400"],["Shinhan Bank","970424"],["Woori Bank","970457"],["CAKE by VPBank","546034"],["Ubank by VPBank","546035"]];
+const bankName=bin=>(BANKS.find(b=>b[1]===bin)||["Bank "+bin])[0];
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const strip=s=>String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D");
+const cleanNote=s=>strip(s).replace(/[^A-Za-z0-9 .,\-]/g," ").replace(/\s+/g," ").trim().slice(0,40);
+const vnd=n=>Math.round(n||0).toLocaleString("vi-VN")+" ₫";
+const fmtDate=t=>new Date(t).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("on"),2000)}
+async function copy(text,ok){
+  try{await navigator.clipboard.writeText(text);toast(ok||"Copied")}
+  catch(e){openSheet(`<h2>Copy this</h2><p class="muted" style="margin-top:0">Select the text and copy it.</p><textarea readonly style="min-height:220px">${esc(text)}</textarea><div class="btns"><button class="btn" data-close>Done</button></div>`);setTimeout(()=>$("#sheet textarea").select(),50)}
+}
+function parseAmount(s){
+  if(s==null)return 0;
+  const t=String(s).toLowerCase().replace(/\s|₫|vnd|vnđ|đ/g,"");
+  const m=t.match(/^(-?[\d.,]+)(k|ng|nghin|nghìn|tr|trieu|triệu|m)?$/);
+  if(!m){const d=t.replace(/[^\d-]/g,"");return d?parseInt(d,10)||0:0}
+  if(m[2]){const v=parseFloat(m[1].replace(",","."));return Math.round(v*(/^(k|ng)/.test(m[2])?1e3:1e6))}
+  return parseInt(m[1].replace(/[.,]/g,""),10)||0;
+}
+
+/* ---------- VietQR (NAPAS / EMVCo) ---------- */
+const tlv=(id,v)=>id+String(v.length).padStart(2,"0")+v;
+function crc16(s){let c=0xFFFF;for(let i=0;i<s.length;i++){c^=s.charCodeAt(i)<<8;for(let j=0;j<8;j++)c=(c&0x8000)?((c<<1)^0x1021)&0xFFFF:(c<<1)&0xFFFF}return c.toString(16).toUpperCase().padStart(4,"0")}
+function vietqrPayload(bin,acc,amount,note){
+  const mai=tlv("00","A000000727")+tlv("01",tlv("00",bin)+tlv("01",acc))+tlv("02","QRIBFTTA");
+  let s=tlv("00","01")+tlv("01",amount?"12":"11")+tlv("38",mai)+tlv("53","704");
+  if(amount)s+=tlv("54",String(amount));
+  s+=tlv("58","VN");
+  if(note)s+=tlv("62",tlv("08",note));
+  s+="6304";return s+crc16(s);
+}
+function qrSvg(text){
+  if(typeof qrcode!=="function")return '<div class="muted" style="font-size:11px;padding:6px">QR couldn\'t load. Use the bank details.</div>';
+  const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});
+}
+function vietqrLink(m,amount,note){
+  const p=new URLSearchParams();if(amount)p.set("amount",amount);if(note)p.set("addInfo",note);if(m.holder)p.set("accountName",m.holder);
+  return `https://img.vietqr.io/image/${m.bin}-${encodeURIComponent(m.acc)}-compact2.png?${p}`;
+}
+const hasBank=m=>m&&m.bin&&m.acc;
+
+/* ---------- settle-up maths ---------- */
+// balances: {memberId: amount}, positive = should receive. Returns [{from,to,amt}]
+function roundBalances(bal){
+  const out={};let sum=0;
+  for(const k in bal){const v=Math.round(bal[k]);if(v){out[k]=v;sum+=v}}
+  if(sum){ // push rounding drift onto the biggest absolute balance
+    const k=Object.keys(out).sort((a,b)=>Math.abs(out[b])-Math.abs(out[a]))[0];
+    if(k){out[k]-=sum;if(!out[k])delete out[k]}
+  }
+  return out;
+}
+function settleDirect(bal){
+  const cred=Object.entries(bal).filter(([,v])=>v>0).map(([id,v])=>({id,v}));
+  const debt=Object.entries(bal).filter(([,v])=>v<0).map(([id,v])=>({id,v:-v,n:0}));
+  const out=[];
+  const pay=(d,c,a)=>{out.push({from:d.id,to:c.id,amt:a});d.v-=a;c.v-=a;d.n++};
+  // 1) exact matches
+  for(const c of cred)for(const d of debt)if(c.v>0&&d.v>0&&c.v===d.v)pay(d,c,c.v);
+  // 2) smallest creditors first, each paid in full by one debtor (prefer someone who hasn't paid yet, then the tightest fit)
+  for(let guard=0;guard<1000;guard++){
+    const cs=cred.filter(c=>c.v>0).sort((a,b)=>a.v-b.v);
+    const ds=debt.filter(d=>d.v>0);
+    if(!cs.length||!ds.length)break;
+    if(cs.length===1){for(const d of ds)pay(d,cs[0],Math.min(d.v,cs[0].v));continue} // everything left goes to the last creditor
+    const c=cs[0];
+    const fit=ds.filter(d=>d.v>=c.v).sort((a,b)=>(a.n-b.n)||(a.v-b.v))[0];
+    if(fit){pay(fit,c,c.v);continue}
+    const d=ds.sort((a,b)=>b.v-a.v)[0]; // nobody can cover c alone: biggest debtor gives all they owe
+    pay(d,c,d.v);
+  }
+  return out;
+}
+function settleHub(bal,hub){
+  const out=[];
+  for(const [id,v] of Object.entries(bal)){
+    if(id===hub||!v)continue;
+    if(v<0)out.push({from:id,to:hub,amt:-v});else out.push({from:hub,to:id,amt:v});
+  }
+  return out.sort((a,b)=>(a.to===hub?0:1)-(b.to===hub?0:1)||b.amt-a.amt);
+}
+
+/* ---------- CSV ---------- */
+function parseCSV(text){
+  const rows=[];let row=[],f="",q=false;
+  text=text.replace(/^﻿/,"");
+  for(let i=0;i<text.length;i++){const ch=text[i];
+    if(q){if(ch==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=ch}
+    else if(ch==='"')q=true;else if(ch===","){row.push(f);f=""}
+    else if(ch==="\n"||ch==="\r"){if(ch==="\r"&&text[i+1]==="\n")i++;row.push(f);rows.push(row);row=[];f=""}
+    else f+=ch}
+  if(f||row.length){row.push(f);rows.push(row)}
+  return rows.filter(r=>r.some(c=>c.trim()));
+}
+// Splitwise group export -> {name: balance}
+function splitwiseCsvBalances(text){
+  const rows=parseCSV(text);const h=rows[0]||[];
+  const ci=h.findIndex(x=>x.trim().toLowerCase()==="currency");
+  if(ci<0||h.length<=ci+1)throw new Error("This doesn't look like a Splitwise export");
+  const names=h.slice(ci+1).map(s=>s.trim());
+  const total=rows.find(r=>(r[1]||"").trim().toLowerCase()==="total balance");
+  const bal={};names.forEach(n=>bal[n]=0);
+  const cur=new Set();
+  if(total){names.forEach((n,i)=>bal[n]=parseFloat(total[ci+1+i])||0);cur.add((total[ci]||"").trim())}
+  else rows.slice(1).forEach(r=>{cur.add((r[ci]||"").trim());names.forEach((n,i)=>bal[n]+=parseFloat(r[ci+1+i])||0)});
+  return {bal,currencies:[...cur].filter(Boolean)};
+}
+
+/* =========================================================
+   API
+   ========================================================= */
+async function api(path,opts={}){
+  const res=await fetch(path,{method:opts.method||"GET",headers:{"content-type":"application/json",...(opts.pin?{"x-organizer-pin":opts.pin}:{})},body:opts.body?JSON.stringify(opts.body):undefined});
+  let d={};try{d=await res.json()}catch(e){}
+  if(!res.ok)throw new Error(d.error||("Error "+res.status));
+  return d;
+}
+let G=null,GID=null,CONFIG={splitwise:false};
+const me=()=>G&&G.members.find(m=>m.id===ls.get("su_me_"+GID,null));
+const mem=id=>G&&G.members.find(m=>m.id===id);
+const nm=id=>(mem(id)||{name:"?"}).name;
+async function loadGroup(gid){
+  G=await api(`/api/g/${gid}`);GID=gid;
+  const rec=ls.get("su_groups",[]).filter(g=>g.id!==gid);rec.unshift({id:gid,name:G.name});ls.set("su_groups",rec.slice(0,10));
+}
+function apply(d){if(d&&d.members&&d.events)G=d;else if(d&&d.state)G=d.state}
+
+/* =========================================================
+   Router
+   ========================================================= */
+function go(path,replace){if(replace)history.replaceState(null,"",path);else history.pushState(null,"",path);route()}
+window.addEventListener("popstate",route);
+document.addEventListener("click",e=>{
+  const a=e.target.closest("a[data-go]");if(a){e.preventDefault();go(a.getAttribute("href"))}
+  if(e.target.closest("[data-close]"))closeSheet();
+});
+let poll=null;
+async function route(){
+  closeSheet();clearInterval(poll);
+  const p=location.pathname.split("/").filter(Boolean);
+  try{
+    if(p[0]==="g"&&/^[A-Za-z0-9]{12}$/.test(p[1]||"")){
+      if(GID!==p[1]||!G){$("#app").innerHTML='<div class="empty">Loading…</div>';await loadGroup(p[1])}
+      const view=p[2]||"",arg=p[3];
+      const render=()=>{
+        if(view==="e"&&arg)return viewEvent(arg);
+        if(view==="new")return viewNew();
+        if(view==="people")return viewPeople();
+        return viewGroup();
+      };
+      render();
+      if(view!=="new")poll=setInterval(async()=>{if(document.hidden||$("#modal").classList.contains("on"))return;try{const before=JSON.stringify(G);await loadGroup(GID);if(JSON.stringify(G)!==before)render()}catch(e){}},15000);
+    }else viewHome();
+  }catch(e){$("#app").innerHTML=`<div class="card"><h2>Couldn't open this</h2><p class="muted">${esc(e.message)}</p><a class="btn" href="/" data-go>Home</a></div>`}
+  window.scrollTo(0,0);
+}
+const gpath=s=>`/g/${GID}${s||""}`;
+function header(title,backHref,backLabel){
+  return `<div class="top">${backHref?`<a class="back" href="${backHref}" data-go>‹ ${esc(backLabel||"Back")}</a>`:""}<h1>${esc(title)}</h1></div>`;
+}
+function tabs(on){
+  return `<nav class="tabs"><a href="${gpath()}" data-go class="${on==="g"?"on":""}">Gatherings</a><a href="${gpath("/people")}" data-go class="${on==="p"?"on":""}">People</a></nav>`;
+}
+
+/* =========================================================
+   Views
+   ========================================================= */
+function viewHome(){
+  const rec=ls.get("su_groups",[]);
+  $("#app").innerHTML=`
+  <div class="hero"><h1>Settle Up</h1><p class="muted" style="font-size:15px">Split the bill in Splitwise, then pay each other back with VietQR. Scan, confirm, done.</p></div>
+  ${rec.length?`<div class="card"><h2>Your groups</h2><div class="list">${rec.map(g=>`<a class="item" href="/g/${esc(g.id)}" data-go><div class="info"><div class="t">${esc(g.name)}</div></div><span class="muted">›</span></a>`).join("")}</div></div>`:""}
+  <div class="card"><h2>Start a group</h2>
+    <p class="muted" style="margin:0">One group per circle of friends. Reuse it for every gathering.</p>
+    <label>Group name</label><input id="gname" placeholder="e.g. Tay Ho Friday crew" maxlength="60">
+    <div class="btns"><button class="btn primary" id="gcreate">Create group</button></div></div>`;
+  $("#gcreate").onclick=async()=>{
+    const b=$("#gcreate");b.disabled=true;
+    try{const d=await api("/api/groups",{method:"POST",body:{name:$("#gname").value}});G=null;go(`/g/${d.id}/people`)}
+    catch(e){toast(e.message);b.disabled=false}
+  };
+}
+
+function whoAmICard(){
+  const m=me();
+  if(m)return `<div class="row muted" style="margin:-4px 2px 12px">You're <b style="color:var(--ink);margin:0 4px">${esc(m.name)}</b><a href="#" id="notme">not you?</a></div>`;
+  if(!G.members.length)return "";
+  return `<div class="infobox"><b>Who are you?</b> Pick yourself to see what you owe.
+    <div class="row" style="margin-top:8px"><select id="pickme" class="grow"><option value="">Choose your name…</option>${G.members.map(x=>`<option value="${x.id}">${esc(x.name)}</option>`).join("")}</select></div>
+    <div class="muted" style="margin-top:6px">Not listed? <a href="#" id="addself">Add yourself</a>.</div></div>`;
+}
+function bindWhoAmI(rerender){
+  const s=$("#pickme");if(s)s.onchange=()=>{ls.set("su_me_"+GID,s.value||null);rerender()};
+  const n=$("#notme");if(n)n.onclick=e=>{e.preventDefault();ls.set("su_me_"+GID,null);rerender()};
+  const a=$("#addself");if(a)a.onclick=e=>{e.preventDefault();memberSheet(null,true,rerender)};
+}
+
+function myStats(ev,mid){
+  let owe=0,get=0;for(const p of ev.payments){if(p.paid)continue;if(p.from===mid)owe+=p.amt;if(p.to===mid)get+=p.amt}return {owe,get};
+}
+function viewGroup(){
+  const m=me();
+  const evs=G.events;
+  $("#app").innerHTML=`
+  ${header(G.name)}
+  ${tabs("g")}
+  ${whoAmICard()}
+  <a class="btn primary block" href="${gpath("/new")}" data-go>+ New gathering</a>
+  <div class="sec">Gatherings</div>
+  <div class="card"><div class="list">
+  ${evs.length?evs.map(ev=>{
+    const done=ev.payments.filter(p=>p.paid).length,n=ev.payments.length;
+    let chip=done===n?`<span class="pill grey">All settled</span>`:`<span class="pill grey">${done}/${n} paid</span>`;
+    if(m){const s=myStats(ev,m.id);if(s.owe)chip=`<span class="pill warn">You owe ${vnd(s.owe)}</span>`;else if(s.get)chip=`<span class="pill">You get ${vnd(s.get)}</span>`}
+    return `<a class="item" href="${gpath("/e/"+ev.id)}" data-go><div class="info"><div class="t">${esc(ev.name)}</div><div class="s">${fmtDate(ev.created)} · ${vnd(ev.payments.reduce((a,p)=>a+p.amt,0))} to settle</div></div>${chip}</a>`;
+  }).join(""):`<div class="empty">No gatherings yet. After your next dinner, tap <b>New gathering</b>.</div>`}
+  </div></div>
+  <div class="btns"><button class="btn small" id="share">Copy group link</button><button class="btn small ghost" id="rename">Rename group</button></div>`;
+  bindWhoAmI(viewGroup);
+  $("#share").onclick=()=>copy(location.origin+gpath(),"Group link copied");
+  $("#rename").onclick=()=>{
+    openSheet(`<h2>Rename group</h2><input id="rn" value="${esc(G.name)}" maxlength="60"><div class="btns"><button class="btn primary" id="rnok">Save</button><button class="btn" data-close>Cancel</button></div>`);
+    $("#rnok").onclick=async()=>{try{apply(await api(`/api/g/${GID}/group`,{method:"POST",body:{name:$("#rn").value}}));closeSheet();viewGroup()}catch(e){toast(e.message)}};
+  };
+}
+
+function viewPeople(){
+  const missing=G.members.filter(x=>!hasBank(x)).length;
+  $("#app").innerHTML=`
+  ${header(G.name)}
+  ${tabs("p")}
+  ${whoAmICard()}
+  <div class="card"><div class="list">
+  ${G.members.length?G.members.map(x=>`<div class="item"><div class="info"><div class="t">${esc(x.name)} ${me()&&me().id===x.id?'<span class="pill">you</span>':""}</div><div class="s">${hasBank(x)?esc(bankName(x.bin))+" · "+esc(x.acc):"No bank details yet"}</div></div><button class="btn small" data-edit="${x.id}">${hasBank(x)?"Edit":"Add bank"}</button></div>`).join(""):`<div class="empty">No one yet. Add yourself first.</div>`}
+  </div>
+  <div class="btns"><button class="btn primary" id="addp">+ Add person</button></div></div>
+  <div class="card"><h2>Get everyone's bank details</h2>
+    <p class="muted" style="margin:0">${missing?`${missing} ${missing>1?"people haven't":"person hasn't"} added bank details. `:""}Send this to the group chat. Each person adds their own, once, and it's reused for every gathering.</p>
+    <div class="btns"><button class="btn small" id="invite">Copy invite message</button></div></div>
+  <p class="muted">Anyone with the group link can see and edit this list, so only share it with the group.</p>`;
+  bindWhoAmI(viewPeople);
+  document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>memberSheet(b.dataset.edit,false,viewPeople));
+  $("#addp").onclick=()=>memberSheet(null,!me(),viewPeople);
+  $("#invite").onclick=()=>copy(`Add your bank details for our settle-ups (one time, takes 30 seconds). Then you'll get a QR code to scan instead of typing account numbers:\n${location.origin+gpath("/people")}`,"Invite copied");
+}
+
+function memberSheet(id,isSelf,after){
+  const x=id?mem(id):{name:"",bin:"970407",acc:"",holder:""};
+  const known=BANKS.some(b=>b[1]===x.bin);
+  openSheet(`<h2>${id?"Edit "+esc(x.name):isSelf?"Add yourself":"Add person"}</h2>
+    <label>Name (same as in Splitwise helps)</label><input id="mName" value="${esc(x.name)}" maxlength="60" placeholder="Anh Pham">
+    <label>Bank</label><select id="mBank">${BANKS.map(([n,b])=>`<option value="${b}" ${b===x.bin?"selected":""}>${esc(n)}</option>`).join("")}<option value="other" ${x.bin&&!known?"selected":""}>Other bank (enter BIN)…</option></select>
+    <div id="mBinW" style="display:${x.bin&&!known?"block":"none"}"><label>Bank BIN (6 digits)</label><input id="mBin" inputmode="numeric" maxlength="6" value="${esc(known?"":x.bin||"")}"></div>
+    <label>Account number</label><input id="mAcc" inputmode="numeric" value="${esc(x.acc||"")}" placeholder="Only needed to receive money">
+    <label>Account holder name</label><input id="mHolder" value="${esc(x.holder||"")}" placeholder="PHAM ANH" style="text-transform:uppercase">
+    <p class="muted">Write the name the way your bank shows it: capitals, no accents.</p>
+    <div class="btns"><button class="btn primary" id="mSave">Save</button><button class="btn" data-close>Cancel</button>${id?`<button class="btn ghost danger" id="mDel" style="margin-left:auto">Remove</button>`:""}</div>`);
+  $("#mBank").onchange=()=>$("#mBinW").style.display=$("#mBank").value==="other"?"block":"none";
+  $("#mSave").onclick=async()=>{
+    const name=$("#mName").value.trim();if(!name)return toast("Add a name");
+    const bin=$("#mBank").value==="other"?$("#mBin").value:$("#mBank").value;
+    const acc=$("#mAcc").value;
+    try{
+      const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{member:{id:id||undefined,name,bin:acc?bin:"",acc,holder:strip($("#mHolder").value)}}});
+      apply(d);if(isSelf&&d.members[0])ls.set("su_me_"+GID,d.members[0].id);
+      closeSheet();toast("Saved");after();
+    }catch(e){toast(e.message)}
+  };
+  const del=$("#mDel");if(del)del.onclick=async()=>{try{apply(await api(`/api/g/${GID}/members/${id}`,{method:"DELETE"}));closeSheet();after()}catch(e){toast(e.message)}};
+}
+
+/* ---------- event view ---------- */
+function messageFor(ev,p){
+  const f=mem(p.from),t=mem(p.to),note=ev.note||cleanNote(ev.name);
+  const link=location.origin+gpath("/e/"+ev.id);
+  if(!hasBank(t))return `Hi ${f.name}! For ${ev.name} you owe ${t.name} ${vnd(p.amt)}.\n${t.name} hasn't added bank details yet. They're listed here once added:\n${link}`;
+  return [`Hi ${f.name}! Settling up for ${ev.name}: please send ${t.name} ${vnd(p.amt)}.`,``,
+    `Scan this QR in any bank app (amount and note are already filled in):`,vietqrLink(t,p.amt,note),``,
+    `Or transfer manually: ${bankName(t.bin)} · ${t.acc}${t.holder?" · "+t.holder:""}${note?"\nNote: "+note:""}`,``,
+    `All payments for this gathering: ${link}`].join("\n");
+}
+const canRecord=(ev,p)=>!!(ev.swGroupId&&CONFIG.splitwise&&p.paid&&!p.swExpenseId&&(mem(p.from)||{}).swId&&(mem(p.to)||{}).swId);
+function payCard(ev,p,mine){
+  const f=mem(p.from),t=mem(p.to),note=ev.note||cleanNote(ev.name);
+  let body;
+  if(!hasBank(t))body=`<div class="warnbox">${esc(t.name)} hasn't added bank details yet. Ask them to add them in <b>People</b>.</div>`;
+  else body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrSvg(vietqrPayload(t.bin,t.acc,p.amt,note))}</div>
+    <div class="bank"><b>${esc(t.holder||t.name)}</b>${esc(bankName(t.bin))}<br><code>${esc(t.acc)}</code>${note?`<div class="muted">Note: ${esc(note)}</div>`:""}</div></div>`;
+  const sw=canRecord(ev,p);
+  return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):esc(f.name)+" → "+esc(t.name)}</div><div class="money">${vnd(p.amt)}</div></div>${body}
+    <div class="btns">${hasBank(t)&&!mine?`<button class="btn small primary" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
+    <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":"Mark paid ✓")}</button>
+    ${sw?`<button class="btn small ghost" data-sw="${p.id}">Record in Splitwise</button>`:""}${p.swExpenseId?`<span class="pill" style="align-self:center">In Splitwise</span>`:""}</div></div>`;
+}
+function viewEvent(eid){
+  const ev=G.events.find(e=>e.id===eid);
+  if(!ev){$("#app").innerHTML=header("Not found",gpath(),G.name)+`<div class="empty">This gathering was deleted.</div>`;return}
+  const m=me();
+  const mineOut=m?ev.payments.filter(p=>p.from===m.id):[];
+  const mineIn=m?ev.payments.filter(p=>p.to===m.id):[];
+  const others=ev.payments.filter(p=>!mineOut.includes(p));
+  const done=ev.payments.filter(p=>p.paid).length,total=ev.payments.reduce((a,p)=>a+p.amt,0);
+  const open=ev.payments.filter(p=>!p.paid&&hasBank(mem(p.to)));
+  $("#app").innerHTML=`
+  ${header(ev.name,gpath(),"Gatherings")}
+  <div class="muted" style="margin:-6px 2px 12px">${fmtDate(ev.created)} · ${done}/${ev.payments.length} paid · ${vnd(total)}${ev.note?` · note “${esc(ev.note)}”`:""}</div>
+  ${whoAmICard()}
+  ${m&&mineOut.length?`<div class="sec">You pay</div>${mineOut.map(p=>payCard(ev,p,true)).join("")}`:""}
+  ${m&&mineIn.length?`<div class="sec">You receive</div><div class="card">${mineIn.map(p=>`<div class="mini ${p.paid?"paid":""}"><div class="grow">${esc(nm(p.from))}</div><span class="amt">${vnd(p.amt)}</span>${hasBank(m)&&!p.paid?`<button class="btn small" data-msg="${p.id}" title="Copy a payment request for ${esc(nm(p.from))}">Copy msg</button>`:""}<button class="btn small" data-paid="${p.id}">${p.paid?"Undo":"Got it ✓"}</button>${canRecord(ev,p)?`<button class="btn small ghost" data-sw="${p.id}">→ Splitwise</button>`:""}${p.swExpenseId?'<span class="pill">In Splitwise</span>':""}</div>`).join("")}${!hasBank(m)?`<div class="warnbox">Add your bank details in People so they get a QR code.</div>`:""}</div>`:""}
+  ${m&&!mineOut.length&&!mineIn.length?`<div class="infobox">You're all square for this one. 🎉</div>`:""}
+  <div class="sec">${m?"Everyone else":"All payments"}</div>
+  ${others.filter(p=>!(m&&p.to===m.id)).map(p=>payCard(ev,p,false)).join("")||'<div class="empty">Nothing else.</div>'}
+  <div class="btns">${open.length>1?`<button class="btn small" id="copyAll">Copy all open messages</button>`:""}<button class="btn small" id="shareEv">Copy link</button><button class="btn small ghost" id="editEv">Edit</button><button class="btn small ghost danger" id="delEv">Delete</button></div>`;
+  bindWhoAmI(()=>viewEvent(eid));
+  const byId=id=>ev.payments.find(p=>p.id===id);
+  document.querySelectorAll("[data-msg]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.msg);copy(messageFor(ev,p),`Message for ${nm(p.from)} copied`)});
+  document.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>copy(mem(byId(b.dataset.acc).to).acc,"Account number copied"));
+  document.querySelectorAll("[data-paid]").forEach(b=>b.onclick=async()=>{
+    const p=byId(b.dataset.paid);b.disabled=true;
+    try{apply(await api(`/api/g/${GID}/events/${eid}/paid`,{method:"POST",body:{pid:p.id,paid:!p.paid}}));viewEvent(eid)}catch(e){toast(e.message);b.disabled=false}
+  });
+  document.querySelectorAll("[data-sw]").forEach(b=>b.onclick=()=>recordInSplitwise(ev,byId(b.dataset.sw)));
+  document.querySelectorAll("[data-big]").forEach(b=>b.onclick=()=>{
+    const p=byId(b.dataset.big),t=mem(p.to);
+    $("#bigQr").innerHTML=qrSvg(vietqrPayload(t.bin,t.acc,p.amt,ev.note||cleanNote(ev.name)));
+    $("#bigCap").innerHTML=`<b>${esc(vnd(p.amt))}</b>${esc(nm(p.from))} → ${esc(t.holder||t.name)} · ${esc(bankName(t.bin))}`;
+    $("#overlay").classList.add("on");
+  });
+  const ca=$("#copyAll");if(ca)ca.onclick=()=>copy(open.map(p=>messageFor(ev,p)).join("\n\n— — —\n\n"),`${open.length} messages copied`);
+  $("#shareEv").onclick=()=>copy(`Settle-up for ${ev.name}. Open it, pick your name, and scan your QR:\n${location.origin+gpath("/e/"+ev.id)}`,"Link copied");
+  $("#editEv").onclick=()=>{
+    openSheet(`<h2>Edit gathering</h2><label>Name</label><input id="en" value="${esc(ev.name)}" maxlength="60"><label>Transfer note</label><input id="eno" value="${esc(ev.note||"")}" maxlength="40"><div class="btns"><button class="btn primary" id="eok">Save</button><button class="btn" data-close>Cancel</button></div>`);
+    $("#eok").onclick=async()=>{try{apply(await api(`/api/g/${GID}/events/${eid}`,{method:"POST",body:{name:$("#en").value,note:cleanNote($("#eno").value)}}));closeSheet();viewEvent(eid)}catch(e){toast(e.message)}};
+  };
+  $("#delEv").onclick=()=>{
+    openSheet(`<h2>Delete “${esc(ev.name)}”?</h2><p class="muted">This removes the gathering and its payments for everyone. Splitwise is not changed.</p><div class="btns"><button class="btn primary" id="dok" style="background:var(--warn);border-color:var(--warn)">Delete</button><button class="btn" data-close>Cancel</button></div>`);
+    $("#dok").onclick=async()=>{try{apply(await api(`/api/g/${GID}/events/${eid}`,{method:"DELETE"}));go(gpath(),true)}catch(e){toast(e.message)}};
+  };
+}
+function pinFlow(cb){
+  const pin=ls.get("su_pin","");if(pin)return cb(pin);
+  openSheet(`<h2>Organizer PIN</h2><p class="muted" style="margin-top:0">Splitwise access is limited to the organizer.</p><input id="pin" type="password" inputmode="numeric" autocomplete="off"><div class="btns"><button class="btn primary" id="pinok">Continue</button><button class="btn" data-close>Cancel</button></div>`);
+  $("#pinok").onclick=()=>{const v=$("#pin").value.trim();if(!v)return;ls.set("su_pin",v);closeSheet();cb(v)};
+}
+function recordInSplitwise(ev,p){
+  pinFlow(async pin=>{
+    try{
+      const d=await api("/api/splitwise/payment",{method:"POST",pin,body:{swGroupId:ev.swGroupId,fromSwId:mem(p.from).swId,toSwId:mem(p.to).swId,amount:p.amt,description:`Settle up · ${ev.name}`}});
+      apply(await api(`/api/g/${GID}/events/${ev.id}/recorded`,{method:"POST",body:{pid:p.id,swExpenseId:d.expenseId||"1"}}));
+      toast("Recorded in Splitwise");viewEvent(ev.id);
+    }catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");toast(e.message)}
+  });
+}
+
+/* ---------- new gathering ---------- */
+let NEW=null;
+function viewNew(){
+  if(!NEW||NEW.gid!==GID)NEW={gid:GID,name:"",note:"",source:CONFIG.splitwise?"sw":"csv",entries:null,swGroupId:null,swGroups:null,mode:"direct",hub:(me()||{}).id||"",typed:"",warn:""};
+  const N=NEW;
+  const srcBtn=(k,l)=>`<button data-src="${k}" class="${N.source===k?"on":""}">${l}</button>`;
+  let src="";
+  if(N.source==="sw"){
+    if(!CONFIG.splitwise)src=`<p class="muted">Splitwise isn't connected on this server yet. See the setup guide, or use a CSV export instead.</p>`;
+    else src=`<p class="muted" style="margin-top:0">Pulls the current balances of a Splitwise group. Organizer only.</p>
+      ${N.swGroups?`<select id="swg"><option value="">Choose a Splitwise group…</option>${N.swGroups.map(g=>`<option value="${g.id}" ${g.id===N.swGroupId?"selected":""}>${esc(g.name)} (${g.members})</option>`).join("")}</select>`:`<button class="btn small" id="swload">Load my Splitwise groups</button>`}`;
+  }else if(N.source==="csv"){
+    src=`<p class="muted" style="margin-top:0">In Splitwise open the group → Settings → <i>Export as spreadsheet</i>, then pick the file here.</p><input type="file" id="csv" accept=".csv,text/csv">`;
+  }else{
+    src=`<p class="muted" style="margin-top:0">One payment per line, e.g. <i>Minh owes Anh 350k</i>. Names must match People.</p><textarea id="typed" placeholder="Minh owes Anh 350.000&#10;Linh owes Anh 1.2tr">${esc(N.typed)}</textarea><div class="btns"><button class="btn small" id="readTyped">Read payments</button></div>`;
+  }
+  // preview
+  let preview="";
+  if(N.entries&&N.entries.length){
+    const unknown=N.entries.filter(e=>!e.memberId);
+    if(N.kind==="balances"){
+      const nz=N.entries.filter(e=>Math.round(e.balance));
+      preview+=`<div class="card"><h2>Balances</h2>${nz.map(e=>`<div class="bal"><span>${esc(e.name)}${e.memberId?"":' <span class="pill grey">new</span>'}</span><span class="${e.balance>0?"pos":"neg"}">${e.balance>0?"gets ":"owes "}${vnd(Math.abs(e.balance))}</span></div>`).join("")||'<div class="empty">Everyone is already square.</div>'}</div>`;
+      preview+=`<div class="card"><h2>How should people pay?</h2><div class="seg"><button data-mode="direct" class="${N.mode==="direct"?"on":""}">Directly to each other</button><button data-mode="hub" class="${N.mode==="hub"?"on":""}">Through one person</button></div>
+        <p class="muted">${N.mode==="direct"?"People pay the ones they owe directly. Smaller amounts are each covered by one person, so nobody makes many small transfers.":"Everyone who owes pays one person, who then pays out the rest. Simplest for the people paying."}</p>
+        ${N.mode==="hub"?`<select id="hub">${N.entries.map(e=>`<option value="${esc(e.key)}" ${e.key===N.hub?"selected":""}>${esc(e.name)}</option>`).join("")}</select>`:""}</div>`;
+    }
+    const pays=computePayments();
+    if(pays.length){
+      const byKey=k=>N.entries.find(e=>e.key===k);
+      const cnt={};pays.forEach(p=>cnt[p.from]=(cnt[p.from]||0)+1);
+      preview+=`<div class="card"><h2>${pays.length} payment${pays.length>1?"s":""}</h2>${pays.map(p=>`<div class="mini"><div class="grow">${esc(byKey(p.from).name)} → ${esc(byKey(p.to).name)}</div><span class="amt">${vnd(p.amt)}</span></div>`).join("")}
+        <p class="muted">Most anyone pays: ${Math.max(...Object.values(cnt))} transfer${Math.max(...Object.values(cnt))>1?"s":""}.${unknown.length?` ${unknown.length} new ${unknown.length>1?"people":"person"} will be added to People.`:""}</p></div>`;
+    }
+  }
+  $("#app").innerHTML=`
+  ${header("New gathering",gpath(),"Cancel")}
+  <div class="card"><label style="margin-top:0">Name</label><input id="nName" value="${esc(N.name)}" maxlength="60" placeholder="e.g. Steak night, Nov 2">
+    <label>Transfer note (shows in the bank app)</label><input id="nNote" value="${esc(N.note)}" maxlength="40" placeholder="Defaults to the name, without accents"></div>
+  <div class="card"><h2>Where are the numbers?</h2><div class="seg" style="margin-bottom:12px">${srcBtn("sw","Splitwise")}${srcBtn("csv","CSV export")}${srcBtn("typed","Type it")}</div>${src}
+    ${N.warn?`<div class="warnbox">${esc(N.warn)}</div>`:""}</div>
+  ${preview}
+  ${N.entries&&computePayments().length?`<button class="btn primary block" id="create">Create gathering</button>`:""}`;
+
+  const keep=()=>{N.name=$("#nName").value;N.note=$("#nNote").value};
+  $("#nName").oninput=keep;$("#nNote").oninput=keep;
+  document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.entries=null;N.warn="";viewNew()});
+  document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{keep();N.mode=b.dataset.mode;if(!N.hub||!N.entries.some(e=>e.key===N.hub))N.hub=(N.entries.find(e=>e.memberId&&me()&&e.memberId===me().id)||N.entries.slice().sort((a,b)=>b.balance-a.balance)[0]).key;viewNew()});
+  const hub=$("#hub");if(hub)hub.onchange=()=>{keep();N.hub=hub.value;viewNew()};
+  const swl=$("#swload");if(swl)swl.onclick=()=>{keep();pinFlow(async pin=>{swl.disabled=true;try{N.swGroups=(await api("/api/splitwise/groups",{pin})).groups;if(!N.swGroups.length)N.warn="No Splitwise groups found.";viewNew()}catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");N.warn=e.message;viewNew()}})};
+  const swg=$("#swg");if(swg)swg.onchange=()=>{keep();if(!swg.value)return;pinFlow(async pin=>{
+    try{const d=await api("/api/splitwise/groups/"+swg.value,{pin});N.swGroupId=d.id;if(!N.name)N.name=d.name;
+      N.warn=d.otherCurrencies.length?`This group also has ${d.otherCurrencies.join(", ")} balances. Only VND is settled here.`:"";
+      setBalances(d.members.map(x=>({name:x.name,swId:x.swId,balance:x.balance})));viewNew()}
+    catch(e){N.warn=e.message;viewNew()}})};
+  const csv=$("#csv");if(csv)csv.onchange=async()=>{keep();const f=csv.files[0];if(!f)return;
+    try{const {bal,currencies}=splitwiseCsvBalances(await f.text());N.swGroupId=null;
+      N.warn=currencies.some(c=>c!=="VND")?`This file has ${currencies.join(", ")} amounts; they're treated as VND.`:"";
+      if(!N.name)N.name=f.name.replace(/\.csv$/i,"").replace(/_/g," ");
+      setBalances(Object.entries(bal).map(([name,balance])=>({name,balance})));viewNew()}
+    catch(e){N.warn=e.message;viewNew()}};
+  const rt=$("#readTyped");if(rt)rt.onclick=()=>{keep();N.typed=$("#typed").value;readTyped();viewNew()};
+  const cr=$("#create");if(cr)cr.onclick=()=>{keep();createGathering(cr)};
+}
+function matchMember(name,swId){
+  if(swId){const m=G.members.find(x=>x.swId===swId);if(m)return m}
+  const n=strip(name).toLowerCase().trim();
+  return G.members.find(x=>strip(x.name).toLowerCase().trim()===n)||null;
+}
+function setBalances(list){
+  const N=NEW;N.kind="balances";
+  const round=roundBalances(Object.fromEntries(list.map((x,i)=>["k"+i,x.balance])));
+  N.entries=list.map((x,i)=>{const m=matchMember(x.name,x.swId);return {key:"k"+i,name:m?m.name:x.name,swId:x.swId||null,memberId:m?m.id:null,balance:round["k"+i]||0}});
+  if(N.mode==="hub"&&!N.entries.some(e=>e.key===N.hub))N.mode="direct";
+}
+function readTyped(){
+  const N=NEW;N.kind="payments";N.warn="";
+  const re=/^(.+?)\s+(?:owes?|nợ|no|pays?|trả|tra|->|→|=>)\s+(.+?)\s*[:\-–]?\s*(?:₫|đ|vnd)?\s*((?:\d[\d.,]*)\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?)\s*(?:₫|đ|vnd|vnđ)?\s*$/i;
+  const entries=[],key=name=>{let e=entries.find(x=>strip(x.name).toLowerCase()===strip(name).toLowerCase());if(!e){const m=matchMember(name);e={key:"t"+entries.length,name:m?m.name:name.trim(),memberId:m?m.id:null,balance:0};entries.push(e)}return e.key};
+  const pays=[];let bad=0;
+  N.typed.split(/\n+/).map(s=>s.trim()).filter(Boolean).forEach(l=>{const m=l.replace(/\s+/g," ").match(re);const a=m&&parseAmount(m[3]);if(!a){bad++;return}pays.push({from:key(m[1]),to:key(m[2]),amt:a})});
+  N.entries=entries;N.typedPays=pays;
+  if(bad)N.warn=`${bad} line${bad>1?"s":""} couldn't be read.`;
+  if(!pays.length&&!bad)N.warn="Type at least one payment.";
+}
+function computePayments(){
+  const N=NEW;if(!N.entries)return [];
+  if(N.kind==="payments")return N.typedPays||[];
+  const bal={};N.entries.forEach(e=>{if(e.balance)bal[e.key]=e.balance});
+  return N.mode==="hub"&&N.hub?settleHub(bal,N.hub):settleDirect(bal);
+}
+async function createGathering(btn){
+  const N=NEW;const pays=computePayments();if(!pays.length)return;
+  if(!N.name.trim())return toast("Give the gathering a name");
+  btn.disabled=true;
+  try{
+    const used=new Set(pays.flatMap(p=>[p.from,p.to]));
+    const toCreate=N.entries.filter(e=>used.has(e.key)&&!e.memberId);
+    const toLink=N.entries.filter(e=>e.memberId&&e.swId&&mem(e.memberId).swId!==e.swId);
+    if(toCreate.length||toLink.length){
+      const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{members:[...toCreate.map(e=>({name:e.name,swId:e.swId||undefined})),...toLink.map(e=>({...mem(e.memberId),swId:e.swId}))]}});
+      apply(d);toCreate.forEach((e,i)=>e.memberId=d.members[i].id);
+    }
+    const idOf=k=>N.entries.find(e=>e.key===k).memberId;
+    const d=await api(`/api/g/${GID}/events`,{method:"POST",body:{name:N.name.trim(),note:cleanNote(N.note||N.name),mode:N.kind==="payments"?"typed":N.mode,source:N.source,swGroupId:N.swGroupId,payments:pays.map(p=>({from:idOf(p.from),to:idOf(p.to),amt:p.amt}))}});
+    apply(d);NEW=null;go(gpath("/e/"+d.event.id),true);
+  }catch(e){toast(e.message);btn.disabled=false}
+}
+
+/* ---------- sheet & overlay ---------- */
+function openSheet(html){$("#sheet").innerHTML=html;$("#modal").classList.add("on")}
+function closeSheet(){$("#modal").classList.remove("on")}
+$("#modal").addEventListener("click",e=>{if(e.target.id==="modal")closeSheet()});
+$("#overlay").onclick=()=>$("#overlay").classList.remove("on");
+
+api("/api/config").then(c=>CONFIG=c).catch(()=>{}).finally(route);
+</script>
+</body>
+</html>
