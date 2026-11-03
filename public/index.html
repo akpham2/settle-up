@@ -137,6 +137,10 @@ function qrSvg(text){
   if(typeof qrcode!=="function")return '<div class="muted" style="font-size:11px;padding:6px">QR couldn\'t load. Use the bank details.</div>';
   const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});
 }
+function qrFor(t,amount,note){
+  if(typeof qrcode==="function"){try{return qrSvg(vietqrPayload(t.bin,t.acc,amount,note))}catch(e){}}
+  return `<img src="${esc(vietqrLink(t,amount,note).replace("-compact2.png","-qr_only.png"))}" alt="VietQR" style="width:100%;height:100%;object-fit:contain">`;
+}
 function vietqrLink(m,amount,note){
   const p=new URLSearchParams();if(amount)p.set("amount",amount);if(note)p.set("addInfo",note);if(m.holder)p.set("accountName",m.holder);
   return `https://img.vietqr.io/image/${m.bin}-${encodeURIComponent(m.acc)}-compact2.png?${p}`;
@@ -421,16 +425,17 @@ function messageFor(ev,p){
     `All payments for this gathering: ${link}`].join("\n");
 }
 const canRecord=(ev,p)=>!!(ev.swGroupId&&CONFIG.splitwise&&p.paid&&!p.swExpenseId&&(mem(p.from)||{}).swId&&(mem(p.to)||{}).swId);
-function payCard(ev,p,mine){
+function payCard(ev,p,role){
+  const mine=role==="out",incoming=role==="in";
   const f=mem(p.from),t=mem(p.to),note=ev.note||cleanNote(ev.name);
   let body;
   if(!hasBank(t))body=`<div class="warnbox">${esc(t.name)} hasn't added bank details yet. Ask them to add them in <b>People</b>.</div>`;
-  else body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrSvg(vietqrPayload(t.bin,t.acc,p.amt,note))}</div>
+  else body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrFor(t,p.amt,note)}</div>
     <div class="bank"><b>${esc(t.holder||t.name)}</b>${esc(bankName(t.bin))}<br><code>${esc(t.acc)}</code>${note?`<div class="muted">Note: ${esc(note)}</div>`:""}</div></div>`;
   const sw=canRecord(ev,p);
-  return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):esc(f.name)+" → "+esc(t.name)}</div><div class="money">${vnd(p.amt)}</div></div>${body}
-    <div class="btns">${hasBank(t)&&!mine?`<button class="btn small primary" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
-    <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":"Mark paid ✓")}</button>
+  return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):incoming?esc(f.name)+" → you":esc(f.name)+" → "+esc(t.name)}</div><div class="money">${vnd(p.amt)}</div></div>${body}
+    <div class="btns">${hasBank(t)?`<button class="btn small primary" data-big="${p.id}">Show QR</button>`:""}${hasBank(t)&&!mine&&!p.paid?`<button class="btn small" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)&&!incoming?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
+    <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":incoming?"Got it ✓":"Mark paid ✓")}</button>
     ${sw?`<button class="btn small ghost" data-sw="${p.id}">Record in Splitwise</button>`:""}${p.swExpenseId?`<span class="pill" style="align-self:center">In Splitwise</span>`:""}</div></div>`;
 }
 function viewEvent(eid){
@@ -446,11 +451,11 @@ function viewEvent(eid){
   ${header(ev.name,gpath(),"Gatherings")}
   <div class="muted" style="margin:-6px 2px 12px">${fmtDate(ev.created)} · ${done}/${ev.payments.length} paid · ${vnd(total)}${ev.note?` · note “${esc(ev.note)}”`:""}</div>
   ${whoAmICard()}
-  ${m&&mineOut.length?`<div class="sec">You pay</div>${mineOut.map(p=>payCard(ev,p,true)).join("")}`:""}
-  ${m&&mineIn.length?`<div class="sec">You receive</div><div class="card">${mineIn.map(p=>`<div class="mini ${p.paid?"paid":""}"><div class="grow">${esc(nm(p.from))}</div><span class="amt">${vnd(p.amt)}</span>${hasBank(m)&&!p.paid?`<button class="btn small" data-msg="${p.id}" title="Copy a payment request for ${esc(nm(p.from))}">Copy msg</button>`:""}<button class="btn small" data-paid="${p.id}">${p.paid?"Undo":"Got it ✓"}</button>${canRecord(ev,p)?`<button class="btn small ghost" data-sw="${p.id}">→ Splitwise</button>`:""}${p.swExpenseId?'<span class="pill">In Splitwise</span>':""}</div>`).join("")}${!hasBank(m)?`<div class="warnbox">Add your bank details in People so they get a QR code.</div>`:""}</div>`:""}
+  ${m&&mineOut.length?`<div class="sec">You pay</div>${mineOut.map(p=>payCard(ev,p,"out")).join("")}`:""}
+  ${m&&mineIn.length?`<div class="sec">You receive · ${vnd(mineIn.filter(p=>!p.paid).reduce((x,p)=>x+p.amt,0))} open</div>${!hasBank(m)?`<div class="warnbox" style="margin:0 0 12px">Add your bank details in People to get QR codes.</div>`:""}${mineIn.map(p=>payCard(ev,p,"in")).join("")}`:""}
   ${m&&!mineOut.length&&!mineIn.length?`<div class="infobox">You're all square for this one. 🎉</div>`:""}
   <div class="sec">${m?"Everyone else":"All payments"}</div>
-  ${others.filter(p=>!(m&&p.to===m.id)).map(p=>payCard(ev,p,false)).join("")||'<div class="empty">Nothing else.</div>'}
+  ${others.filter(p=>!(m&&p.to===m.id)).map(p=>payCard(ev,p,"other")).join("")||'<div class="empty">Nothing else.</div>'}
   <div class="btns">${open.length>1?`<button class="btn small" id="copyAll">Copy all open messages</button>`:""}<button class="btn small" id="shareEv">Copy link</button><button class="btn small ghost" id="editEv">Edit</button><button class="btn small ghost danger" id="delEv">Delete</button></div>`;
   bindWhoAmI(()=>viewEvent(eid));
   const byId=id=>ev.payments.find(p=>p.id===id);
@@ -463,7 +468,7 @@ function viewEvent(eid){
   document.querySelectorAll("[data-sw]").forEach(b=>b.onclick=()=>recordInSplitwise(ev,byId(b.dataset.sw)));
   document.querySelectorAll("[data-big]").forEach(b=>b.onclick=()=>{
     const p=byId(b.dataset.big),t=mem(p.to);
-    $("#bigQr").innerHTML=qrSvg(vietqrPayload(t.bin,t.acc,p.amt,ev.note||cleanNote(ev.name)));
+    $("#bigQr").innerHTML=qrFor(t,p.amt,ev.note||cleanNote(ev.name));
     $("#bigCap").innerHTML=`<b>${esc(vnd(p.amt))}</b>${esc(nm(p.from))} → ${esc(t.holder||t.name)} · ${esc(bankName(t.bin))}`;
     $("#overlay").classList.add("on");
   });
