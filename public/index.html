@@ -337,7 +337,7 @@ function viewPeople(){
   <div class="card"><div class="list">
   ${G.members.length?G.members.map(x=>`<div class="item"><div class="info"><div class="t">${esc(x.name)} ${me()&&me().id===x.id?'<span class="pill">you</span>':""}</div><div class="s">${hasBank(x)?esc(bankName(x.bin))+" · "+esc(x.acc):"No bank details yet"}</div></div><button class="btn small" data-edit="${x.id}">${hasBank(x)?"Edit":"Add bank"}</button></div>`).join(""):`<div class="empty">No one yet. Add yourself first.</div>`}
   </div>
-  <div class="btns"><button class="btn primary" id="addp">+ Add person</button></div></div>
+  <div class="btns"><button class="btn primary" id="addp">+ Add person</button><button class="btn" id="pastep">Paste a list</button></div></div>
   <div class="card"><h2>Get everyone's bank details</h2>
     <p class="muted" style="margin:0">${missing?`${missing} ${missing>1?"people haven't":"person hasn't"} added bank details. `:""}Send this to the group chat. Each person adds their own, once, and it's reused for every gathering.</p>
     <div class="btns"><button class="btn small" id="invite">Copy invite message</button></div></div>
@@ -345,9 +345,46 @@ function viewPeople(){
   bindWhoAmI(viewPeople);
   document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>memberSheet(b.dataset.edit,false,viewPeople));
   $("#addp").onclick=()=>memberSheet(null,!me(),viewPeople);
+  $("#pastep").onclick=pastePeopleSheet;
   $("#invite").onclick=()=>copy(`Add your bank details for our settle-ups (one time, takes 30 seconds). Then you'll get a QR code to scan instead of typing account numbers:\n${location.origin+gpath("/people")}`,"Invite copied");
 }
 
+const BANK_ALIASES={tcb:"970407",techcom:"970407",vcb:"970436",vietcom:"970436",ctg:"970415",vietin:"970415",bidv:"970418",agri:"970405",agribank:"970405",mb:"970422",mbbank:"970422",acb:"970416",vpb:"970432",vpbank:"970432",tpb:"970423",tpbank:"970423",stb:"970403",sacom:"970403",sacombank:"970403",vib:"970441",shb:"970443",hdb:"970437",hdbank:"970437",seab:"970440",seabank:"970440",ocb:"970448",msb:"970426",eib:"970431",exim:"970431",lpb:"970449",lpbank:"970449",cake:"546034",ubank:"546035",bvbank:"970454",vccb:"970454",namabank:"970428",nab:"970428",abb:"970425",abbank:"970425",bacabank:"970409",kienlong:"970452",klb:"970452",pvcom:"970412",shinhan:"970424",woori:"970457",saigonbank:"970400"};
+function findBank(tok){
+  const k=strip(tok).toLowerCase().replace(/[^a-z0-9]/g,"");if(!k)return null;
+  if(/^\d{6}$/.test(k)&&BANKS.some(b=>b[1]===k))return k;
+  if(BANK_ALIASES[k])return BANK_ALIASES[k];
+  const hit=BANKS.find(([n])=>strip(n).toLowerCase().replace(/[^a-z0-9]/g,"")===k)||BANKS.find(([n])=>strip(n).toLowerCase().replace(/[^a-z0-9]/g,"").startsWith(k)&&k.length>=3);
+  return hit?hit[1]:null;
+}
+function parsePeopleLines(text){
+  return text.split(/\n+/).map(l=>l.trim()).filter(Boolean).map(l=>{
+    const parts=l.split(/\s*[,\t|;]\s*/).map(x=>x.trim()).filter(Boolean);
+    const out={name:parts.shift()||""};
+    for(const t of parts){
+      const b=!out.bin&&findBank(t);
+      if(b){out.bin=b;continue}
+      if(!out.acc&&/^[0-9][0-9 .-]{4,}$/.test(t)){out.acc=t.replace(/\D/g,"");continue}
+      if(!out.holder&&/[a-zA-Z\u00C0-\u1EF9]/.test(t)){out.holder=strip(t).toUpperCase();continue}
+    }
+    return out;
+  }).filter(x=>x.name);
+}
+function pastePeopleSheet(){
+  openSheet(`<h2>Paste a list of people</h2>
+    <p class="muted" style="margin-top:0">One person per line. Bank details are optional: <i>name, bank, account number, holder name</i>.</p>
+    <textarea id="pp" placeholder="Anh Pham, Techcombank, 19031234567, PHAM ANH&#10;Hoa Nguyen, VCB, 0011000123&#10;Nolan&#10;Huy"></textarea>
+    <div id="ppPrev" class="muted" style="margin-top:8px"></div>
+    <div class="btns"><button class="btn primary" id="ppOk">Add people</button><button class="btn" data-close>Cancel</button></div>`);
+  const prev=()=>{const l=parsePeopleLines($("#pp").value);$("#ppPrev").innerHTML=l.length?l.map(x=>{const ex=matchMember(x.name);return `• ${esc(x.name)}${x.bin?` · ${esc(bankName(x.bin))}`:""}${x.acc?` · ${esc(x.acc)}`:""}${x.acc&&!x.bin?' <span style="color:var(--warn)">(bank not recognised)</span>':""}${ex?' <span class="pill grey">update</span>':""}`}).join("<br>"):""};
+  $("#pp").oninput=prev;
+  $("#ppOk").onclick=async()=>{
+    const list=parsePeopleLines($("#pp").value);if(!list.length)return toast("Paste at least one name");
+    const body=list.map(x=>{const ex=matchMember(x.name);const r={...(ex||{}),name:ex?ex.name:x.name};
+      if(x.acc&&x.bin){r.bin=x.bin;r.acc=x.acc}if(x.holder)r.holder=x.holder;return r});
+    try{apply(await api(`/api/g/${GID}/members`,{method:"POST",body:{members:body}}));closeSheet();toast(`${list.length} saved`);viewPeople()}catch(e){toast(e.message)}
+  };
+}
 function memberSheet(id,isSelf,after){
   const x=id?mem(id):{name:"",bin:"970407",acc:"",holder:""};
   const known=BANKS.some(b=>b[1]===x.bin);
@@ -470,7 +507,12 @@ function viewNew(){
   }else if(N.source==="csv"){
     src=`<p class="muted" style="margin-top:0">In Splitwise open the group → Settings → <i>Export as spreadsheet</i>, then pick the file here.</p><input type="file" id="csv" accept=".csv,text/csv">`;
   }else{
-    src=`<p class="muted" style="margin-top:0">One payment per line, e.g. <i>Minh owes Anh 350k</i>. Names must match People.</p><textarea id="typed" placeholder="Minh owes Anh 350.000&#10;Linh owes Anh 1.2tr">${esc(N.typed)}</textarea><div class="btns"><button class="btn small" id="readTyped">Read payments</button></div>`;
+    src=`<p class="muted" style="margin-top:0">Paste the costs, one per line. Add a <b>People:</b> line for who came (write <i>x2</i> for a couple). Otherwise costs are split between everyone in People.</p>
+      <textarea id="typed" style="min-height:170px" placeholder="People: Anh x2, Hoa, Nolan x2, Huy, Chau&#10;Steak 2.75tr paid by Anh&#10;Pizza 764k paid by Hoa&#10;Beer 438k paid by Huy for Anh, Nolan, Huy&#10;Nolan paid 124k for fruit&#10;Chau owes Hoa 50k"></textarea>
+      <div class="btns"><button class="btn small" id="readTyped">Read it</button></div>
+      <details class="muted" style="margin-top:8px"><summary>What can I write?</summary>
+      <div style="margin-top:6px"><i>Steak 2.75tr paid by Anh</i> splits between everyone.<br><i>Beer 438k paid by Huy for Anh, Nolan x2</i> splits between those people only.<br><i>Anh paid 500k for taxi</i> also works.<br><i>Chau owes Hoa 50k</i> adds a direct debt.<br>Amounts: 350k, 1.2tr, 350.000, 350,000₫.</div></details>
+      ${N.info?`<div class="infobox" style="margin:10px 0 0">${N.info}</div>`:""}`;
   }
   // preview
   let preview="";
@@ -495,14 +537,14 @@ function viewNew(){
   ${header("New gathering",gpath(),"Cancel")}
   <div class="card"><label style="margin-top:0">Name</label><input id="nName" value="${esc(N.name)}" maxlength="60" placeholder="e.g. Steak night, Nov 2">
     <label>Transfer note (shows in the bank app)</label><input id="nNote" value="${esc(N.note)}" maxlength="40" placeholder="Defaults to the name, without accents"></div>
-  <div class="card"><h2>Where are the numbers?</h2><div class="seg" style="margin-bottom:12px">${srcBtn("sw","Splitwise")}${srcBtn("csv","CSV export")}${srcBtn("typed","Type it")}</div>${src}
+  <div class="card"><h2>Where are the numbers?</h2><div class="seg" style="margin-bottom:12px">${srcBtn("sw","Splitwise")}${srcBtn("csv","CSV export")}${srcBtn("typed","Paste")}</div>${src}
     ${N.warn?`<div class="warnbox">${esc(N.warn)}</div>`:""}</div>
   ${preview}
   ${N.entries&&computePayments().length?`<button class="btn primary block" id="create">Create gathering</button>`:""}`;
 
   const keep=()=>{N.name=$("#nName").value;N.note=$("#nNote").value};
   $("#nName").oninput=keep;$("#nNote").oninput=keep;
-  document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.entries=null;N.warn="";viewNew()});
+  document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.entries=null;N.warn="";N.info="";viewNew()});
   document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{keep();N.mode=b.dataset.mode;if(!N.hub||!N.entries.some(e=>e.key===N.hub))N.hub=(N.entries.find(e=>e.memberId&&me()&&e.memberId===me().id)||N.entries.slice().sort((a,b)=>b.balance-a.balance)[0]).key;viewNew()});
   const hub=$("#hub");if(hub)hub.onchange=()=>{keep();N.hub=hub.value;viewNew()};
   const swl=$("#swload");if(swl)swl.onclick=()=>{keep();pinFlow(async pin=>{swl.disabled=true;try{N.swGroups=(await api("/api/splitwise/groups",{pin})).groups;if(!N.swGroups.length)N.warn="No Splitwise groups found.";viewNew()}catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");N.warn=e.message;viewNew()}})};
@@ -517,6 +559,7 @@ function viewNew(){
       if(!N.name)N.name=f.name.replace(/\.csv$/i,"").replace(/_/g," ");
       setBalances(Object.entries(bal).map(([name,balance])=>({name,balance})));viewNew()}
     catch(e){N.warn=e.message;viewNew()}};
+  const tx=$("#typed");if(tx){tx.value=N.typed;tx.oninput=()=>N.typed=tx.value}
   const rt=$("#readTyped");if(rt)rt.onclick=()=>{keep();N.typed=$("#typed").value;readTyped();viewNew()};
   const cr=$("#create");if(cr)cr.onclick=()=>{keep();createGathering(cr)};
 }
@@ -531,15 +574,60 @@ function setBalances(list){
   N.entries=list.map((x,i)=>{const m=matchMember(x.name,x.swId);return {key:"k"+i,name:m?m.name:x.name,swId:x.swId||null,memberId:m?m.id:null,balance:round["k"+i]||0}});
   if(N.mode==="hub"&&!N.entries.some(e=>e.key===N.hub))N.mode="direct";
 }
+function canonName(name,known){
+  const clean=String(name||"").replace(/\s+/g," ").trim().replace(/^(you|me|tôi|toi|mình|minh)$/i,()=>(me()||{}).name||"Me");
+  const n=strip(clean).toLowerCase();if(!n)return null;
+  const pool=[...new Set([...G.members.map(m=>m.name),...known])];
+  const hit=pool.find(x=>strip(x).toLowerCase()===n);if(hit)return hit;
+  const firsts=pool.filter(x=>strip(x).toLowerCase().split(" ")[0]===n);
+  if(firsts.length===1)return firsts[0];
+  return clean;
+}
+function parseList(str,known){
+  return str.split(/\s*,\s*|\s*;\s*|\s+(?:and|và|va|&)\s+/i).map(x=>x.trim()).filter(Boolean).map(x=>{
+    const m=x.match(/^(.+?)\s*[x×*]\s*(\d+(?:[.,]\d+)?)$/i)||x.match(/^(.+?)\s*\((\d+(?:[.,]\d+)?)\)$/);
+    const name=canonName(m?m[1]:x,known);if(name&&!known.includes(name))known.push(name);
+    return {name,w:m?parseFloat(m[2].replace(",",".")):1};
+  }).filter(x=>x.name&&x.w>0);
+}
 function readTyped(){
-  const N=NEW;N.kind="payments";N.warn="";
-  const re=/^(.+?)\s+(?:owes?|nợ|no|pays?|trả|tra|->|→|=>)\s+(.+?)\s*[:\-–]?\s*(?:₫|đ|vnd)?\s*((?:\d[\d.,]*)\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?)\s*(?:₫|đ|vnd|vnđ)?\s*$/i;
-  const entries=[],key=name=>{let e=entries.find(x=>strip(x.name).toLowerCase()===strip(name).toLowerCase());if(!e){const m=matchMember(name);e={key:"t"+entries.length,name:m?m.name:name.trim(),memberId:m?m.id:null,balance:0};entries.push(e)}return e.key};
-  const pays=[];let bad=0;
-  N.typed.split(/\n+/).map(s=>s.trim()).filter(Boolean).forEach(l=>{const m=l.replace(/\s+/g," ").match(re);const a=m&&parseAmount(m[3]);if(!a){bad++;return}pays.push({from:key(m[1]),to:key(m[2]),amt:a})});
-  N.entries=entries;N.typedPays=pays;
-  if(bad)N.warn=`${bad} line${bad>1?"s":""} couldn't be read.`;
-  if(!pays.length&&!bad)N.warn="Type at least one payment.";
+  const N=NEW;N.warn="";N.info="";
+  const AMT="(\\d[\\d.,]*\\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?)\\s*(?:₫|đ|vnd|vnđ)?";
+  const reOwe=new RegExp("^(.+?) (?:owes?|nợ|no|->|→|=>) (.+?)\\s*[:\\-–]?\\s*(?:₫|đ|vnd)?\\s*"+AMT+"$","i");
+  const rePaidBy=new RegExp("^(.*?)\\s*[:\\-–]?\\s*(?:₫|đ)?"+AMT+" (?:paid by|by|do|trả bởi|tra boi) (.+?)(?: (?:for|split|chia|cho) (.+))?$","i");
+  const rePaid=new RegExp("^(.+?) (?:paid|trả|tra) (?:₫|đ)?"+AMT+"(?: (?:for|on|cho) (.+?))?(?: (?:split|chia) (.+))?$","i");
+  const rePeople=/^(?:people|who|everyone|ai|mọi người|moi nguoi)\s*:\s*(.+)$/i;
+  const lines=N.typed.split(/\n+/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
+  const known=[],bal={},add=(n,v)=>{bal[n]=(bal[n]||0)+v;if(!known.includes(n))known.push(n)};
+  let crowd=null;
+  for(const l of lines){const m=l.match(rePeople);if(m)crowd=parseList(m[1],known)}
+  const costs=[],bad=[];let nPay=0;
+  for(const l of lines){
+    if(rePeople.test(l))continue;
+    let m=l.match(reOwe);
+    if(m){const a=parseAmount(m[3]),f=canonName(m[1],known),t=canonName(m[2],known);if(a&&f&&t&&f!==t){add(f,-a);add(t,a);nPay++;continue}}
+    let payer=null,amt=null,list=null;
+    if((m=l.match(rePaidBy))){payer=m[3];amt=m[2];list=m[4]||null}
+    else if((m=l.match(rePaid))){payer=m[1];amt=m[2];list=m[4]||null}
+    const a=amt&&parseAmount(amt);
+    if(a&&payer){payer=canonName(payer,known);add(payer,0);costs.push({payer,a,list});continue}
+    bad.push(l);
+  }
+  const everyone=crowd&&crowd.length?crowd:[...new Set([...G.members.map(x=>x.name),...known])].map(name=>({name,w:1}));
+  let total=0;
+  for(const c of costs){
+    const parts=c.list?parseList(c.list,known):everyone;
+    const W=parts.reduce((s,x)=>s+x.w,0);if(!W){bad.push(`${c.payer} ${c.a}`);continue}
+    add(c.payer,c.a);total+=c.a;
+    parts.forEach(x=>add(x.name,-c.a*x.w/W));
+  }
+  if(bad.length)N.warn=`Couldn't read: ${bad.slice(0,3).join(" · ")}${bad.length>3?` (+${bad.length-3} more)`:""}`;
+  if(!costs.length&&!nPay){if(!bad.length)N.warn="Paste at least one cost.";N.entries=null;return}
+  const shares=everyone.reduce((s,x)=>s+x.w,0);
+  N.info=`Read ${costs.length} cost${costs.length===1?"":"s"}${costs.length?` (${vnd(total)})`:""}${nPay?` and ${nPay} direct debt${nPay>1?"s":""}`:""}.`+
+    (costs.some(c=>!c.list)?` Shared costs are split between ${everyone.length} people${shares!==everyone.length?` (${shares} shares)`:""}${crowd?"":", meaning everyone in People. Add a People: line to change that"}.`:"");
+  N.entries=null;
+  setBalances(Object.entries(bal).map(([name,balance])=>({name,balance})));
 }
 function computePayments(){
   const N=NEW;if(!N.entries)return [];
