@@ -55,7 +55,7 @@
   .money{font-weight:800;font-size:19px;color:var(--accent);white-space:nowrap}
   .pay.paid .money{color:var(--done);text-decoration:line-through}
   .qrbox{display:flex;gap:14px;align-items:center;margin-top:10px}
-  .qr{width:136px;height:136px;flex:none;background:#fff;border-radius:10px;padding:6px;cursor:zoom-in;border:1px solid var(--line)}
+  .qr{width:140px;height:182px;flex:none;background:#fff;border-radius:10px;padding:4px;cursor:zoom-in;border:1px solid var(--line);-webkit-touch-callout:default}
   .qr svg{width:100%;height:100%;display:block}
   .bank{font-size:14px;min-width:0}
   .bank b{display:block;font-size:15px}
@@ -72,7 +72,8 @@
   .pos{color:var(--accent);font-weight:700}.neg{color:var(--warn);font-weight:700}
   .overlay{position:fixed;inset:0;background:rgba(0,0,0,.85);display:none;align-items:center;justify-content:center;flex-direction:column;z-index:50;padding:20px}
   .overlay.on{display:flex}
-  .overlay .big{background:#fff;padding:16px;border-radius:16px;width:min(86vw,420px);aspect-ratio:1}
+  .overlay .big{background:#fff;padding:10px;border-radius:16px;width:min(86vw,420px);max-height:72vh;display:flex;align-items:center;justify-content:center}
+  .overlay .big img{max-height:68vh}
   .overlay .big svg{width:100%;height:100%}
   .overlay .cap{color:#fff;text-align:center;margin-top:14px;font-size:15px}
   .overlay .cap b{font-size:22px;display:block}
@@ -92,7 +93,7 @@
 <div class="wrap" id="app"><div class="empty">Loading…</div></div>
 
 <div class="modal" id="modal"><div class="sheet" id="sheet"></div></div>
-<div class="overlay" id="overlay"><div class="big" id="bigQr"></div><div class="cap" id="bigCap"></div><div class="cap" style="color:#bbb;font-size:13px">Tap anywhere to close</div></div>
+<div class="overlay" id="overlay"><div class="big" id="bigQr"></div><div class="cap" id="bigCap"></div><div class="cap" style="color:#bbb;font-size:13px">Long-press the image to save it · tap outside to close</div></div>
 <div class="toast" id="toast"></div>
 
 <script>
@@ -137,9 +138,46 @@ function qrSvg(text){
   if(typeof qrcode!=="function")return '<div class="muted" style="font-size:11px;padding:6px">QR couldn\'t load. Use the bank details.</div>';
   const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});
 }
+// Draws the QR plus amount / name / bank as a PNG on a canvas (shareable, long-press savable).
+const QR_CACHE=new Map();
+function qrCanvas(t,amount,note){
+  if(typeof qrcode!=="function")return null;
+  const q=qrcode(0,"M");q.addData(vietqrPayload(t.bin,t.acc,amount,note));q.make();
+  const n=q.getModuleCount(),sc=12,qm=4,qs=(n+qm*2)*sc,W=qs,H=qs+190;
+  const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
+  x.fillStyle="#fff";x.fillRect(0,0,W,H);
+  x.fillStyle="#000";
+  for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))x.fillRect((k+qm)*sc,(r+qm)*sc,sc,sc);
+  const font='-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
+  x.textAlign="center";let y=qs+18;
+  x.fillStyle="#0e7c66";x.font=`800 44px ${font}`;y+=40;x.fillText(vnd(amount),W/2,y);
+  x.fillStyle="#1c1b19";x.font=`700 28px ${font}`;y+=46;x.fillText(t.holder||t.name,W/2,y,W-40);
+  x.fillStyle="#555";x.font=`500 25px ${font}`;y+=38;x.fillText(`${bankName(t.bin)} · ${t.acc}`,W/2,y,W-40);
+  if(note){x.font=`400 22px ${font}`;y+=34;x.fillText(`Nội dung: ${note}`,W/2,y,W-40)}
+  return c;
+}
+function qrDataUrl(t,amount,note){
+  const k=[t.bin,t.acc,t.holder,amount,note].join("|");
+  if(!QR_CACHE.has(k)){const c=qrCanvas(t,amount,note);QR_CACHE.set(k,c?c.toDataURL("image/png"):null)}
+  return QR_CACHE.get(k);
+}
 function qrFor(t,amount,note){
-  if(typeof qrcode==="function"){try{return qrSvg(vietqrPayload(t.bin,t.acc,amount,note))}catch(e){}}
-  return `<img src="${esc(vietqrLink(t,amount,note).replace("-compact2.png","-qr_only.png"))}" alt="VietQR" style="width:100%;height:100%;object-fit:contain">`;
+  const u=qrDataUrl(t,amount,note);
+  const src=u||vietqrLink(t,amount,note);
+  return `<img src="${esc(src)}" alt="VietQR ${esc(vnd(amount))} to ${esc(t.holder||t.name)}" style="width:100%;height:100%;object-fit:contain;display:block">`;
+}
+async function shareQr(t,amount,note,fromName){
+  const fname=`VietQR-${strip(t.name).replace(/[^A-Za-z0-9]+/g,"-")}-${amount}.png`;
+  const text=`${fromName?fromName+" → ":""}${t.holder||t.name}: ${vnd(amount)}`;
+  const u=qrDataUrl(t,amount,note);
+  if(!u){window.open(vietqrLink(t,amount,note),"_blank");return}
+  const blob=await (await fetch(u)).blob();
+  const file=new File([blob],fname,{type:"image/png"});
+  try{
+    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"VietQR",text});return}
+  }catch(e){if(e&&e.name==="AbortError")return}
+  const a=document.createElement("a");a.href=u;a.download=fname;document.body.appendChild(a);a.click();a.remove();
+  toast("QR image saved");
 }
 function vietqrLink(m,amount,note){
   const p=new URLSearchParams();if(amount)p.set("amount",amount);if(note)p.set("addInfo",note);if(m.holder)p.set("accountName",m.holder);
@@ -434,7 +472,7 @@ function payCard(ev,p,role){
     <div class="bank"><b>${esc(t.holder||t.name)}</b>${esc(bankName(t.bin))}<br><code>${esc(t.acc)}</code>${note?`<div class="muted">Note: ${esc(note)}</div>`:""}</div></div>`;
   const sw=canRecord(ev,p);
   return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):incoming?esc(f.name)+" → you":esc(f.name)+" → "+esc(t.name)}</div><div class="money">${vnd(p.amt)}</div></div>${body}
-    <div class="btns">${hasBank(t)?`<button class="btn small primary" data-big="${p.id}">Show QR</button>`:""}${hasBank(t)&&!mine&&!p.paid?`<button class="btn small" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)&&!incoming?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
+    <div class="btns">${hasBank(t)?`<button class="btn small primary" data-share="${p.id}">Share QR</button>`:""}${hasBank(t)&&!mine&&!p.paid?`<button class="btn small" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)&&!incoming?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
     <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":incoming?"Got it ✓":"Mark paid ✓")}</button>
     ${sw?`<button class="btn small ghost" data-sw="${p.id}">Record in Splitwise</button>`:""}${p.swExpenseId?`<span class="pill" style="align-self:center">In Splitwise</span>`:""}</div></div>`;
 }
@@ -469,8 +507,12 @@ function viewEvent(eid){
   document.querySelectorAll("[data-big]").forEach(b=>b.onclick=()=>{
     const p=byId(b.dataset.big),t=mem(p.to);
     $("#bigQr").innerHTML=qrFor(t,p.amt,ev.note||cleanNote(ev.name));
-    $("#bigCap").innerHTML=`<b>${esc(vnd(p.amt))}</b>${esc(nm(p.from))} → ${esc(t.holder||t.name)} · ${esc(bankName(t.bin))}`;
+    $("#bigCap").innerHTML=`${esc(nm(p.from))} → ${esc(t.holder||t.name)}<div style="margin-top:12px"><button class="btn primary" id="bigShare">Share QR</button></div>`;
+    $("#bigShare").onclick=e=>{e.stopPropagation();shareQr(t,p.amt,ev.note||cleanNote(ev.name),nm(p.from))};
     $("#overlay").classList.add("on");
+  });
+  document.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>{
+    const p=byId(b.dataset.share);shareQr(mem(p.to),p.amt,ev.note||cleanNote(ev.name),nm(p.from));
   });
   const ca=$("#copyAll");if(ca)ca.onclick=()=>copy(open.map(p=>messageFor(ev,p)).join("\n\n— — —\n\n"),`${open.length} messages copied`);
   $("#shareEv").onclick=()=>copy(`Settle-up for ${ev.name}. Open it, pick your name, and scan your QR:\n${location.origin+gpath("/e/"+ev.id)}`,"Link copied");
@@ -662,7 +704,7 @@ async function createGathering(btn){
 function openSheet(html){$("#sheet").innerHTML=html;$("#modal").classList.add("on")}
 function closeSheet(){$("#modal").classList.remove("on")}
 $("#modal").addEventListener("click",e=>{if(e.target.id==="modal")closeSheet()});
-$("#overlay").onclick=()=>$("#overlay").classList.remove("on");
+$("#overlay").onclick=e=>{if(e.target.tagName!=="IMG")$("#overlay").classList.remove("on")};
 
 api("/api/config").then(c=>CONFIG=c).catch(()=>{}).finally(route);
 </script>
