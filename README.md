@@ -1,8 +1,9 @@
 # Settle Up
 
-Split the bill in Splitwise, then pay each other back with VietQR.
+Track shared costs for each gathering (like Splitwise) and pay each other back with VietQR.
 
 - **One link per group of friends.** Each person adds their own bank details once, and they're reused for every gathering.
+- **Costs like Splitwise.** Add, edit or delete costs any time. Split equally, by shares (×2 for couples), between only some people, or by exact amounts. Balances and who-pays-whom update live, and payments already marked paid are kept.
 - **A new gathering for each dinner.** Pull the balances straight from Splitwise, upload Splitwise's CSV export, or **paste the costs** (`Steak 2.75tr paid by Anh`) and it does the splitting, so Splitwise is optional.
 - **Paste a list of people** (`name, bank, account, holder`) instead of adding them one by one.
 - **Two ways to settle.** *Directly to each other* covers each small amount with one person, so nobody makes lots of tiny transfers. *Through one person* has everyone pay one person, who then pays out the rest.

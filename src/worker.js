@@ -2,7 +2,7 @@
 // Serves the API under /api/*. The UI (public/index.html) is served by Workers Static Assets.
 
 const SW_BASE = "https://secure.splitwise.com/api/v3.0";
-const LIMITS = { members: 150, events: 300, payments: 150 };
+const LIMITS = { members: 150, events: 300, payments: 150, expenses: 300, parts: 80 };
 
 /* ---------------- helpers ---------------- */
 const json = (data, status = 200) =>
@@ -28,6 +28,62 @@ function safeEqual(a, b) {
   let r = 0;
   for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
   return r === 0;
+}
+
+/* ---------------- validation of gathering data ---------------- */
+const sint = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && Math.abs(n) < 1e12 ? n : 0; };
+function cleanPeople(list, ids) {
+  const seen = new Set(), out = [];
+  for (const p of Array.isArray(list) ? list : []) {
+    const id = str(p && p.id, 20), w = Number(p && p.w);
+    if (!ids.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    out.push({ id, w: Number.isFinite(w) && w > 0 && w <= 20 ? Math.round(w * 100) / 100 : 1 });
+    if (out.length >= LIMITS.parts) break;
+  }
+  return out;
+}
+// kinds: split (equal by shares), exact (fixed amounts), net (imported balances that sum to 0)
+function cleanExpense(x, ids) {
+  if (!x || typeof x !== "object") return { error: "Bad cost" };
+  const kind = ["split", "exact", "net"].includes(x.kind) ? x.kind : "split";
+  const e = { id: /^[A-Za-z0-9]{4,12}$/.test(x.id || "") ? x.id : rid(8), kind, desc: str(x.desc, 80) || "Cost", created: Number(x.created) || Date.now() };
+  if (kind === "net") {
+    const nets = {};
+    let sum = 0, any = false;
+    for (const [id, v] of Object.entries(x.nets || {})) {
+      if (!ids.has(id)) return { error: "Unknown person in imported balances" };
+      const n = sint(v); if (n) { nets[id] = n; sum += n; any = true; }
+    }
+    if (!any) return { error: "Nothing to import" };
+    if (sum !== 0) return { error: "Imported balances must add up to zero" };
+    e.nets = nets; e.amt = int(x.amt) || 0;
+    return { e };
+  }
+  e.amt = int(x.amt);
+  if (!e.amt) return { error: "Enter an amount" };
+  e.payer = str(x.payer, 20);
+  if (!ids.has(e.payer)) return { error: "Choose who paid" };
+  if (kind === "split") {
+    e.parts = cleanPeople(x.parts, ids);
+    if (!e.parts.length) return { error: "Choose who shares this cost" };
+  } else {
+    const seen = new Set(); e.parts = []; let sum = 0;
+    for (const p of Array.isArray(x.parts) ? x.parts : []) {
+      const id = str(p && p.id, 20), a = int(p && p.amt);
+      if (!ids.has(id) || seen.has(id) || !a) continue;
+      seen.add(id); e.parts.push({ id, amt: a }); sum += a;
+    }
+    if (!e.parts.length) return { error: "Enter at least one amount" };
+    if (sum !== e.amt) return { error: `Amounts add up to ${sum}, not ${e.amt}` };
+  }
+  return { e };
+}
+function cleanPayments(list, ids) {
+  return (Array.isArray(list) ? list : [])
+    .slice(0, LIMITS.payments)
+    .map((p) => ({ id: rid(6), from: str(p.from, 20), to: str(p.to, 20), amt: int(p.amt), paid: false }))
+    .filter((p) => p.amt && ids.has(p.from) && ids.has(p.to) && p.from !== p.to);
 }
 
 /* ---------------- Durable Object: one per group ---------------- */
@@ -96,25 +152,29 @@ export class Group {
       return save();
     }
 
-    // POST /events  {name, note, mode, payments:[{from,to,amt}], swGroupId}
+    // POST /events  {name, note, mode, hub, people, expenses, payments, swGroupId}
     if (a === "events" && method === "POST" && !b) {
       if (s.events.length >= LIMITS.events) return json({ error: "Too many gatherings; delete some old ones" }, 400);
       const ids = new Set(s.members.map((m) => m.id));
-      const payments = (Array.isArray(body.payments) ? body.payments : [])
-        .slice(0, LIMITS.payments)
-        .map((p) => ({ id: rid(6), from: str(p.from, 20), to: str(p.to, 20), amt: int(p.amt), paid: false }))
-        .filter((p) => p.amt && ids.has(p.from) && ids.has(p.to) && p.from !== p.to);
-      if (!payments.length) return json({ error: "No valid payments" }, 400);
+      const expenses = [];
+      for (const x of (Array.isArray(body.expenses) ? body.expenses : []).slice(0, LIMITS.expenses)) {
+        const r = cleanExpense(x, ids); if (r.error) return json({ error: r.error }, 400); expenses.push(r.e);
+      }
+      const payments = cleanPayments(body.payments, ids);
+      const ledger = Array.isArray(body.expenses) || Array.isArray(body.people);
+      if (!ledger && !payments.length) return json({ error: "No valid payments" }, 400);
       const ev = {
         id: rid(8),
         name: str(body.name, 60) || "Gathering",
         note: str(body.note, 40),
-        mode: str(body.mode, 20),
+        mode: ["direct", "hub", "typed"].includes(body.mode) ? body.mode : "direct",
+        hub: ids.has(body.hub) ? body.hub : null,
         source: str(body.source, 20),
         swGroupId: body.swGroupId ? digits(body.swGroupId, 20) : null,
         created: Date.now(),
         payments,
       };
+      if (ledger) { ev.people = cleanPeople(body.people, ids); ev.expenses = expenses; }
       s.events.unshift(ev);
       await this.storage.put("state", s);
       return json({ state: s, event: ev });
@@ -132,6 +192,32 @@ export class Group {
     if (ev && !c && method === "POST") {
       if (body.name !== undefined) ev.name = str(body.name, 60) || ev.name;
       if (body.note !== undefined) ev.note = str(body.note, 40);
+      const ids = new Set(s.members.map((m) => m.id));
+      if (["direct", "hub"].includes(body.mode)) ev.mode = body.mode;
+      if (body.hub !== undefined) ev.hub = ids.has(body.hub) ? body.hub : null;
+      if (body.people !== undefined) ev.people = cleanPeople(body.people, ids);
+      if (body.payments !== undefined) { // replace the unpaid part of the plan; paid ones are kept
+        ev.payments = [...ev.payments.filter((p) => p.paid), ...cleanPayments(body.payments, ids)];
+      }
+      return save();
+    }
+    // POST /events/:id/expenses {expense, payments?}  (upsert; optional new plan for unpaid payments)
+    if (ev && c === "expenses" && method === "POST" && !parts[3]) {
+      const ids = new Set(s.members.map((m) => m.id));
+      if (!ev.expenses) ev.expenses = [];
+      const list = Array.isArray(body.expenses) ? body.expenses : [body.expense];
+      for (const x of list) {
+        const r = cleanExpense(x, ids); if (r.error) return json({ error: r.error }, 400);
+        const i = ev.expenses.findIndex((e) => e.id === r.e.id);
+        if (i >= 0) ev.expenses[i] = { ...r.e, created: ev.expenses[i].created };
+        else { if (ev.expenses.length >= LIMITS.expenses) return json({ error: "Too many costs" }, 400); ev.expenses.push(r.e); }
+      }
+      if (Array.isArray(body.payments)) ev.payments = [...ev.payments.filter((p) => p.paid), ...cleanPayments(body.payments, ids)];
+      return save();
+    }
+    // DELETE /events/:id/expenses/:xid  (body-less; plan updated by a following POST /events/:id)
+    if (ev && c === "expenses" && parts[3] && method === "DELETE") {
+      ev.expenses = (ev.expenses || []).filter((e) => e.id !== parts[3]);
       return save();
     }
     // POST /events/:id/paid {pid, paid}
