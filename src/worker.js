@@ -2,6 +2,9 @@
 // Serves the API under /api/*. The UI (public/index.html) is served by Workers Static Assets.
 
 const SW_BASE = "https://secure.splitwise.com/api/v3.0";
+// Supported currencies and their minor-unit decimals. Amounts are stored as integers in minor units.
+const CUR = { VND: 0, AUD: 2, USD: 2, NZD: 2, EUR: 2, GBP: 2, SGD: 2, CAD: 2, HKD: 2, THB: 2, JPY: 0, KRW: 0 };
+const cur = (v, d = "VND") => (Object.hasOwn(CUR, v) ? v : d);
 const LIMITS = { members: 150, events: 300, payments: 150, expenses: 300, parts: 80 };
 
 /* ---------------- helpers ---------------- */
@@ -31,6 +34,14 @@ function safeEqual(a, b) {
 }
 
 /* ---------------- validation of gathering data ---------------- */
+function cleanRates(r, base) {
+  const out = {};
+  for (const [k, v] of Object.entries(r && typeof r === "object" ? r : {})) {
+    const n = Number(v);
+    if (Object.hasOwn(CUR, k) && k !== base && Number.isFinite(n) && n > 1e-9 && n < 1e9) out[k] = n;
+  }
+  return out;
+}
 const sint = (v) => { const n = Math.round(Number(v)); return Number.isFinite(n) && Math.abs(n) < 1e12 ? n : 0; };
 function cleanPeople(list, ids) {
   const seen = new Set(), out = [];
@@ -47,7 +58,7 @@ function cleanPeople(list, ids) {
 function cleanExpense(x, ids) {
   if (!x || typeof x !== "object") return { error: "Bad cost" };
   const kind = ["split", "exact", "net"].includes(x.kind) ? x.kind : "split";
-  const e = { id: /^[A-Za-z0-9]{4,12}$/.test(x.id || "") ? x.id : rid(8), kind, desc: str(x.desc, 80) || "Cost", created: Number(x.created) || Date.now() };
+  const e = { id: /^[A-Za-z0-9]{4,12}$/.test(x.id || "") ? x.id : rid(8), kind, cur: cur(x.cur), desc: str(x.desc, 80) || "Cost", created: Number(x.created) || Date.now() };
   if (kind === "net") {
     const nets = {};
     let sum = 0, any = false;
@@ -137,6 +148,7 @@ export class Group {
         if (m.acc !== undefined) ex.acc = acct(m.acc);
         if (m.holder !== undefined) ex.holder = str(m.holder, 60).toUpperCase();
         if (m.swId !== undefined) ex.swId = m.swId ? digits(m.swId, 20) : null;
+        if (m.paypal !== undefined) ex.paypal = String(m.paypal ?? "").trim().replace(/^https?:\/\//i, "").replace(/^(www\.)?paypal\.me\//i, "").replace(/[^A-Za-z0-9@._+\-]/g, "").slice(0, 80);
         ex.updated = Date.now();
         out.push(ex);
       }
@@ -168,13 +180,14 @@ export class Group {
         name: str(body.name, 60) || "Gathering",
         note: str(body.note, 40),
         mode: ["direct", "hub", "typed"].includes(body.mode) ? body.mode : "direct",
+        cur: cur(body.cur),
         hub: ids.has(body.hub) ? body.hub : null,
         source: str(body.source, 20),
         swGroupId: body.swGroupId ? digits(body.swGroupId, 20) : null,
         created: Date.now(),
         payments,
       };
-      if (ledger) { ev.people = cleanPeople(body.people, ids); ev.expenses = expenses; }
+      if (ledger) { ev.people = cleanPeople(body.people, ids); ev.expenses = expenses; ev.rates = cleanRates(body.rates, ev.cur); }
       s.events.unshift(ev);
       await this.storage.put("state", s);
       return json({ state: s, event: ev });
@@ -196,6 +209,11 @@ export class Group {
       if (["direct", "hub"].includes(body.mode)) ev.mode = body.mode;
       if (body.hub !== undefined) ev.hub = ids.has(body.hub) ? body.hub : null;
       if (body.people !== undefined) ev.people = cleanPeople(body.people, ids);
+      if (body.cur !== undefined && cur(body.cur) !== (ev.cur || "VND")) {
+        if (ev.payments.some((p) => p.paid)) return json({ error: "Some payments are already marked paid, so the settle currency can't change. Undo them first." }, 400);
+        ev.cur = cur(body.cur);
+      }
+      if (body.rates !== undefined) ev.rates = cleanRates(body.rates, ev.cur || "VND");
       if (body.payments !== undefined) { // replace the unpaid part of the plan; paid ones are kept
         ev.payments = [...ev.payments.filter((p) => p.paid), ...cleanPayments(body.payments, ids)];
       }
@@ -212,6 +230,7 @@ export class Group {
         if (i >= 0) ev.expenses[i] = { ...r.e, created: ev.expenses[i].created };
         else { if (ev.expenses.length >= LIMITS.expenses) return json({ error: "Too many costs" }, 400); ev.expenses.push(r.e); }
       }
+      if (body.rates) ev.rates = cleanRates({ ...(ev.rates || {}), ...body.rates }, ev.cur || "VND");
       if (Array.isArray(body.payments)) ev.payments = [...ev.payments.filter((p) => p.paid), ...cleanPayments(body.payments, ids)];
       return save();
     }
@@ -275,15 +294,15 @@ async function handleSplitwise(request, env, rest) {
     if (!g) return json({ error: "Splitwise group not found" }, 404);
     const currencies = new Set();
     const members = (g.members || []).map((u) => {
-      let vnd = 0;
+      const balances = {};
       for (const b of u.balance || []) {
         currencies.add(b.currency_code);
-        if (b.currency_code === "VND") vnd += Number(b.amount) || 0;
+        if (Object.hasOwn(CUR, b.currency_code)) balances[b.currency_code] = (balances[b.currency_code] || 0) + (Number(b.amount) || 0);
       }
-      return { swId: String(u.id), name: swName(u), balance: vnd };
+      return { swId: String(u.id), name: swName(u), balance: balances.VND || 0, balances };
     });
-    currencies.delete("VND");
-    return json({ id: String(g.id), name: g.name, members, otherCurrencies: [...currencies] });
+    const unsupported = [...currencies].filter((c) => !Object.hasOwn(CUR, c));
+    return json({ id: String(g.id), name: g.name, members, currencies: [...currencies].filter((c) => Object.hasOwn(CUR, c)), unsupported, otherCurrencies: unsupported });
   }
   // POST /api/splitwise/payment {swGroupId, fromSwId, toSwId, amount, description}
   if (rest === "/payment" && request.method === "POST") {
@@ -291,14 +310,15 @@ async function handleSplitwise(request, env, rest) {
     const amount = int(b.amount);
     const groupId = digits(b.swGroupId, 20), from = digits(b.fromSwId, 20), to = digits(b.toSwId, 20);
     if (!amount || !groupId || !from || !to) return json({ error: "Missing payment details" }, 400);
-    const cost = amount.toFixed(2);
+    const c = cur(b.currency);
+    const cost = (amount / 10 ** CUR[c]).toFixed(2);
     const d = await sw(env, "/create_expense", {
       method: "POST",
       body: JSON.stringify({
         cost,
         description: str(b.description, 60) || "Settle up (VietQR)",
         payment: true,
-        currency_code: "VND",
+        currency_code: c,
         group_id: Number(groupId),
         users__0__user_id: Number(from),
         users__0__paid_share: cost,
@@ -324,6 +344,26 @@ export default {
     try {
       if (p === "/api/config" && request.method === "GET")
         return json({ splitwise: !!(env.SPLITWISE_API_KEY && env.ORGANIZER_PIN) });
+
+      // GET /api/rates?base=AUD -> { base, date, rates: { USD: <AUD per 1 USD>, ... } }
+      if (p === "/api/rates" && request.method === "GET") {
+        const base = cur(url.searchParams.get("base"), "");
+        if (!base) return json({ error: "Unsupported currency" }, 400);
+        const cacheKey = new Request("https://rates.cache/" + base);
+        const cache = typeof caches !== "undefined" ? caches.default : null;
+        let hit = cache ? await cache.match(cacheKey) : null;
+        if (hit) return hit;
+        const r = await fetch("https://open.er-api.com/v6/latest/" + base);
+        const d = await r.json().catch(() => ({}));
+        if (!r.ok || d.result !== "success" || !d.rates) return json({ error: "Couldn't get exchange rates right now" }, 502);
+        const rates = {};
+        for (const k of Object.keys(CUR)) if (k !== base && d.rates[k] > 0) rates[k] = 1 / d.rates[k];
+        const res = new Response(JSON.stringify({ base, date: d.time_last_update_utc || null, rates, source: "https://www.exchangerate-api.com" }), {
+          headers: { "content-type": "application/json; charset=utf-8", "cache-control": "public, max-age=21600" },
+        });
+        if (cache) await cache.put(cacheKey, res.clone());
+        return res;
+      }
 
       if (p === "/api/groups" && request.method === "POST") {
         const body = await request.json().catch(() => ({}));

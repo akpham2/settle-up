@@ -1,9 +1,11 @@
 # Settle Up
 
-Track shared costs for each gathering (like Splitwise) and pay each other back with VietQR.
+Track shared costs for each gathering or trip (like Splitwise), in any currency, and pay each other back: VietQR for VND, PayPal for everything else.
 
 - **One link per group of friends.** Each person adds their own bank details once, and they're reused for every gathering.
 - **Costs like Splitwise.** Add, edit or delete costs any time. Split equally, by shares (×2 for couples), between only some people, or by exact amounts. Balances and who-pays-whom update live, and payments already marked paid are kept.
+- **Multi-currency.** Each gathering settles in one currency (e.g. AUD). Costs can be in VND, AUD, USD, NZD, EUR, GBP, SGD, CAD, HKD, THB, JPY or KRW and are converted at the gathering's rates. Rates are filled in daily from [Exchange Rate API](https://www.exchangerate-api.com) and you can edit them to match what your card charged.
+- **PayPal for non-VND.** People add their PayPal.me username, and payers get a *Pay with PayPal* link and QR with the amount and currency filled in (`paypal.me/name/25.50AUD`).
 - **A new gathering for each dinner.** Pull the balances straight from Splitwise, upload Splitwise's CSV export, or **paste the costs** (`Steak 2.75tr paid by Anh`) and it does the splitting, so Splitwise is optional.
 - **Paste a list of people** (`name, bank, account, holder`) instead of adding them one by one.
 - **Two ways to settle.** *Directly to each other* covers each small amount with one person, so nobody makes lots of tiny transfers. *Through one person* has everyone pay one person, who then pays out the rest.

@@ -106,7 +106,39 @@ const $=s=>document.querySelector(s);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const strip=s=>String(s||"").normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/đ/g,"d").replace(/Đ/g,"D");
 const cleanNote=s=>strip(s).replace(/[^A-Za-z0-9 .,\-]/g," ").replace(/\s+/g," ").trim().slice(0,40);
-const vnd=n=>Math.round(n||0).toLocaleString("vi-VN")+" ₫";
+const CURRENCIES={VND:{d:0,sym:"₫",name:"Vietnamese đồng"},AUD:{d:2,sym:"A$",name:"Australian dollar"},USD:{d:2,sym:"US$",name:"US dollar"},NZD:{d:2,sym:"NZ$",name:"New Zealand dollar"},EUR:{d:2,sym:"€",name:"Euro"},GBP:{d:2,sym:"£",name:"British pound"},SGD:{d:2,sym:"S$",name:"Singapore dollar"},CAD:{d:2,sym:"C$",name:"Canadian dollar"},HKD:{d:2,sym:"HK$",name:"Hong Kong dollar"},THB:{d:2,sym:"฿",name:"Thai baht"},JPY:{d:0,sym:"¥",name:"Japanese yen"},KRW:{d:0,sym:"₩",name:"Korean won"}};
+const CODES=Object.keys(CURRENCIES);
+const D=c=>(CURRENCIES[c]||CURRENCIES.VND).d;
+function money(n,c){
+  c=CURRENCIES[c]?c:"VND";n=Math.round(n||0);
+  if(c==="VND")return n.toLocaleString("vi-VN")+" ₫";
+  const d=D(c),s=(Math.abs(n)/10**d).toLocaleString("en-AU",{minimumFractionDigits:d,maximumFractionDigits:d});
+  return (n<0?"-":"")+CURRENCIES[c].sym+s;
+}
+const vnd=n=>money(n,"VND");
+const toMajor=(n,c)=>(Math.round(n)/10**D(c)).toFixed(D(c));
+const fmtInput=(n,c)=>n?(D(c)?toMajor(n,c):Math.round(n).toLocaleString("vi-VN")):"";
+const curOpts=(sel,extra=[])=>[...new Set([sel,...extra,"VND","AUD","USD","NZD",...CODES])].filter(c=>CURRENCIES[c]).map(c=>`<option value="${c}" ${c===sel?"selected":""}>${c} · ${esc(CURRENCIES[c].name)}</option>`).join("");
+// Currency named in a bit of text ("US$450", "450 nzd", "A$80", "2.75tr"); null if none.
+const CUR_RE=/\b(VND|AUD|USD|NZD|EUR|GBP|SGD|CAD|HKD|THB|JPY|KRW)\b|(US\$|USD\$|AU\$|A\$|NZ\$|S\$|C\$|HK\$|€|£|¥|₩|฿|₫|đ|vnđ)/i;
+function detectCur(t){
+  const m=String(t||"").match(CUR_RE);if(!m)return null;
+  if(m[1])return m[1].toUpperCase();
+  const s=m[2].toUpperCase();
+  return {"US$":"USD","USD$":"USD","AU$":"AUD","A$":"AUD","NZ$":"NZD","S$":"SGD","C$":"CAD","HK$":"HKD","€":"EUR","£":"GBP","¥":"JPY","₩":"KRW","฿":"THB","₫":"VND","Đ":"VND","VNĐ":"VND"}[s]||null;
+}
+// "25.50", "1,234.56", "1.234,56", "450", "1.2k" -> minor units of currency c
+function parseMoney(str,c){
+  let t=String(str??"").replace(new RegExp(CUR_RE.source,"gi"),"").replace(/\$/g,"").replace(/\s/g,"").toLowerCase();
+  if(!D(c))return parseAmount(t);
+  let mul=1;const m=t.match(/^(.*?)(k|m)$/);if(m){t=m[1];mul=m[2]==="k"?1e3:1e6}
+  if(!/^[\d.,]+$/.test(t))return 0;
+  const ld=t.lastIndexOf("."),lc=t.lastIndexOf(","),seps=(t.match(/[.,]/g)||[]).length;
+  let dec=Math.max(ld,lc);
+  if(dec>=0&&!(ld>=0&&lc>=0)&&(seps>1||t.length-dec-1===3))dec=-1;
+  const ip=(dec>=0?t.slice(0,dec):t).replace(/[.,]/g,""),fp=dec>=0?t.slice(dec+1):"";
+  return Math.round(parseFloat((ip||"0")+"."+(fp||"0"))*mul*10**D(c))||0;
+}
 const fmtDate=t=>new Date(t).toLocaleDateString("en-GB",{day:"numeric",month:"short",year:"numeric"});
 const ls={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
 function toast(m){const t=$("#toast");t.textContent=m;t.classList.add("on");clearTimeout(toast.t);toast.t=setTimeout(()=>t.classList.remove("on"),2000)}
@@ -138,11 +170,11 @@ function qrSvg(text){
   if(typeof qrcode!=="function")return '<div class="muted" style="font-size:11px;padding:6px">QR couldn\'t load. Use the bank details.</div>';
   const q=qrcode(0,"M");q.addData(text);q.make();return q.createSvgTag({cellSize:4,margin:2,scalable:true});
 }
-// Draws the QR plus amount / name / bank as a PNG on a canvas (shareable, long-press savable).
+// Draws a QR plus caption lines as a PNG (shareable, long-press savable).
 const QR_CACHE=new Map();
-function qrCanvas(t,amount,note){
+function qrCanvas(payload,cap){
   if(typeof qrcode!=="function")return null;
-  const q=qrcode(0,"M");q.addData(vietqrPayload(t.bin,t.acc,amount,note));q.make();
+  const q=qrcode(0,"M");q.addData(payload);q.make();
   const n=q.getModuleCount(),sc=12,qm=4,qs=(n+qm*2)*sc,W=qs,H=qs+190;
   const c=document.createElement("canvas");c.width=W;c.height=H;const x=c.getContext("2d");
   x.fillStyle="#fff";x.fillRect(0,0,W,H);
@@ -150,31 +182,42 @@ function qrCanvas(t,amount,note){
   for(let r=0;r<n;r++)for(let k=0;k<n;k++)if(q.isDark(r,k))x.fillRect((k+qm)*sc,(r+qm)*sc,sc,sc);
   const font='-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Arial,sans-serif';
   x.textAlign="center";let y=qs+18;
-  x.fillStyle="#0e7c66";x.font=`800 44px ${font}`;y+=40;x.fillText(vnd(amount),W/2,y);
-  x.fillStyle="#1c1b19";x.font=`700 28px ${font}`;y+=46;x.fillText(t.holder||t.name,W/2,y,W-40);
-  x.fillStyle="#555";x.font=`500 25px ${font}`;y+=38;x.fillText(`${bankName(t.bin)} · ${t.acc}`,W/2,y,W-40);
-  if(note){x.font=`400 22px ${font}`;y+=34;x.fillText(`Nội dung: ${note}`,W/2,y,W-40)}
+  x.fillStyle=cap.color||"#0e7c66";x.font=`800 44px ${font}`;y+=40;x.fillText(cap.amount,W/2,y,W-40);
+  x.fillStyle="#1c1b19";x.font=`700 28px ${font}`;y+=46;x.fillText(cap.title,W/2,y,W-40);
+  x.fillStyle="#555";x.font=`500 25px ${font}`;y+=38;x.fillText(cap.sub,W/2,y,W-40);
+  if(cap.note){x.font=`400 22px ${font}`;y+=34;x.fillText(cap.note,W/2,y,W-40)}
   return c;
 }
-function qrDataUrl(t,amount,note){
-  const k=[t.bin,t.acc,t.holder,amount,note].join("|");
-  if(!QR_CACHE.has(k)){const c=qrCanvas(t,amount,note);QR_CACHE.set(k,c?c.toDataURL("image/png"):null)}
+function qrImage(payload,cap){
+  const k=payload+"|"+JSON.stringify(cap);
+  if(!QR_CACHE.has(k)){const c=qrCanvas(payload,cap);QR_CACHE.set(k,c?c.toDataURL("image/png"):null)}
   return QR_CACHE.get(k);
 }
-function qrFor(t,amount,note){
-  const u=qrDataUrl(t,amount,note);
-  const src=u||vietqrLink(t,amount,note);
-  return `<img src="${esc(src)}" alt="VietQR ${esc(vnd(amount))} to ${esc(t.holder||t.name)}" style="width:100%;height:100%;object-fit:contain;display:block">`;
+const vietqrCap=(t,amount,note)=>({amount:vnd(amount),title:t.holder||t.name,sub:`${bankName(t.bin)} · ${t.acc}`,note:note?`Nội dung: ${note}`:""});
+function paypalLink(m,amt,c){
+  if(!m||!m.paypal||m.paypal.includes("@"))return null;
+  return `https://paypal.me/${encodeURIComponent(m.paypal)}/${toMajor(amt,c)}${c}`;
 }
-async function shareQr(t,amount,note,fromName){
-  const fname=`VietQR-${strip(t.name).replace(/[^A-Za-z0-9]+/g,"-")}-${amount}.png`;
-  const text=`${fromName?fromName+" → ":""}${t.holder||t.name}: ${vnd(amount)}`;
-  const u=qrDataUrl(t,amount,note);
-  if(!u){window.open(vietqrLink(t,amount,note),"_blank");return}
+const paypalCap=(t,amt,c)=>({amount:money(amt,c),title:t.name,sub:`PayPal · paypal.me/${t.paypal}`,note:"Scan with your phone camera",color:"#003087"});
+// image (data URL) for paying member t: VietQR for VND, PayPal link QR otherwise
+function payImageUrl(t,amt,c,note){
+  if(c==="VND")return qrImage(vietqrPayload(t.bin,t.acc,amt,note),vietqrCap(t,amt,note))||vietqrLink(t,amt,note);
+  const link=paypalLink(t,amt,c);return link?qrImage(link,paypalCap(t,amt,c)):null;
+}
+function qrFor(t,amount,note,c="VND"){
+  const src=payImageUrl(t,amount,c,note);
+  if(!src)return '<div class="muted" style="font-size:12px;padding:8px">QR couldn\'t load. Use the link instead.</div>';
+  return `<img src="${esc(src)}" alt="QR ${esc(money(amount,c))} to ${esc(t.holder||t.name)}" style="width:100%;height:100%;object-fit:contain;display:block">`;
+}
+async function shareQr(t,amount,note,fromName,c="VND"){
+  const fname=`${c==="VND"?"VietQR":"PayPal"}-${strip(t.name).replace(/[^A-Za-z0-9]+/g,"-")}-${toMajor(amount,c)}${c}.png`;
+  const text=`${fromName?fromName+" → ":""}${t.holder||t.name}: ${money(amount,c)}${c!=="VND"&&paypalLink(t,amount,c)?"\n"+paypalLink(t,amount,c):""}`;
+  const u=payImageUrl(t,amount,c,note);
+  if(!u||!u.startsWith("data:")){window.open(c==="VND"?vietqrLink(t,amount,note):paypalLink(t,amount,c),"_blank");return}
   const blob=await (await fetch(u)).blob();
   const file=new File([blob],fname,{type:"image/png"});
   try{
-    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"VietQR",text});return}
+    if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:c==="VND"?"VietQR":"PayPal",text});return}
   }catch(e){if(e&&e.name==="AbortError")return}
   const a=document.createElement("a");a.href=u;a.download=fname;document.body.appendChild(a);a.click();a.remove();
   toast("QR image saved");
@@ -183,7 +226,8 @@ function vietqrLink(m,amount,note){
   const p=new URLSearchParams();if(amount)p.set("amount",amount);if(note)p.set("addInfo",note);if(m.holder)p.set("accountName",m.holder);
   return `https://img.vietqr.io/image/${m.bin}-${encodeURIComponent(m.acc)}-compact2.png?${p}`;
 }
-const hasBank=m=>m&&m.bin&&m.acc;
+const hasBank=m=>!!(m&&m.bin&&m.acc);
+const canReceive=(m,c)=>c==="VND"?hasBank(m):!!(m&&m.paypal);
 
 /* ---------- settle-up maths ---------- */
 // balances: {memberId: amount}, positive = should receive. Returns [{from,to,amt}]
@@ -357,8 +401,8 @@ function viewGroup(){
   ${evs.length?evs.map(ev=>{
     const done=ev.payments.filter(p=>p.paid).length,n=ev.payments.length;
     let chip=isLedger(ev)&&!ev.expenses.length?`<span class="pill grey">No costs yet</span>`:done===n?`<span class="pill grey">All settled</span>`:`<span class="pill grey">${done}/${n} paid</span>`;
-    if(m){const s=myStats(ev,m.id);if(s.owe)chip=`<span class="pill warn">You owe ${vnd(s.owe)}</span>`;else if(s.get)chip=`<span class="pill">You get ${vnd(s.get)}</span>`}
-    return `<a class="item" href="${gpath("/e/"+ev.id)}" data-go><div class="info"><div class="t">${esc(ev.name)}</div><div class="s">${fmtDate(ev.created)} · ${isLedger(ev)?`${ev.expenses.length} cost${ev.expenses.length===1?"":"s"} · ${vnd(costTotal(ev.expenses))}`:`${vnd(ev.payments.reduce((a,p)=>a+p.amt,0))} to settle`}</div></div>${chip}</a>`;
+    if(m){const s=myStats(ev,m.id);if(s.owe)chip=`<span class="pill warn">You owe ${money(s.owe,evCur(ev))}</span>`;else if(s.get)chip=`<span class="pill">You get ${money(s.get,evCur(ev))}</span>`}
+    return `<a class="item" href="${gpath("/e/"+ev.id)}" data-go><div class="info"><div class="t">${esc(ev.name)}</div><div class="s">${fmtDate(ev.created)} · ${isLedger(ev)?`${ev.expenses.length} cost${ev.expenses.length===1?"":"s"} · ${money(costTotal(ev.expenses,ev),evCur(ev))}`:`${vnd(ev.payments.reduce((a,p)=>a+p.amt,0))} to settle`}</div></div>${chip}</a>`;
   }).join(""):`<div class="empty">No gatherings yet. After your next dinner, tap <b>New gathering</b>.</div>`}
   </div></div>
   <div class="btns"><button class="btn small" id="share">Copy group link</button><button class="btn small ghost" id="rename">Rename group</button></div>`;
@@ -371,24 +415,24 @@ function viewGroup(){
 }
 
 function viewPeople(){
-  const missing=G.members.filter(x=>!hasBank(x)).length;
+  const missing=G.members.filter(x=>!hasBank(x)&&!x.paypal).length;
   $("#app").innerHTML=`
   ${header(G.name)}
   ${tabs("p")}
   ${whoAmICard()}
   <div class="card"><div class="list">
-  ${G.members.length?G.members.map(x=>`<div class="item"><div class="info"><div class="t">${esc(x.name)} ${me()&&me().id===x.id?'<span class="pill">you</span>':""}</div><div class="s">${hasBank(x)?esc(bankName(x.bin))+" · "+esc(x.acc):"No bank details yet"}</div></div><button class="btn small" data-edit="${x.id}">${hasBank(x)?"Edit":"Add bank"}</button></div>`).join(""):`<div class="empty">No one yet. Add yourself first.</div>`}
+  ${G.members.length?G.members.map(x=>`<div class="item"><div class="info"><div class="t">${esc(x.name)} ${me()&&me().id===x.id?'<span class="pill">you</span>':""}</div><div class="s">${[hasBank(x)?esc(bankName(x.bin))+" · "+esc(x.acc):"",x.paypal?"PayPal · "+esc(x.paypal):""].filter(Boolean).join(" &nbsp;|&nbsp; ")||"No payment details yet"}</div></div><button class="btn small" data-edit="${x.id}">${hasBank(x)||x.paypal?"Edit":"Add details"}</button></div>`).join(""):`<div class="empty">No one yet. Add yourself first.</div>`}
   </div>
   <div class="btns"><button class="btn primary" id="addp">+ Add person</button><button class="btn" id="pastep">Paste a list</button></div></div>
-  <div class="card"><h2>Get everyone's bank details</h2>
-    <p class="muted" style="margin:0">${missing?`${missing} ${missing>1?"people haven't":"person hasn't"} added bank details. `:""}Send this to the group chat. Each person adds their own, once, and it's reused for every gathering.</p>
+  <div class="card"><h2>Get everyone's payment details</h2>
+    <p class="muted" style="margin:0">${missing?`${missing} ${missing>1?"people haven't":"person hasn't"} added payment details. `:""}Send this to the group chat. Each person adds their own, once, and it's reused for every gathering.</p>
     <div class="btns"><button class="btn small" id="invite">Copy invite message</button></div></div>
   <p class="muted">Anyone with the group link can see and edit this list, so only share it with the group.</p>`;
   bindWhoAmI(viewPeople);
   document.querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>memberSheet(b.dataset.edit,false,viewPeople));
   $("#addp").onclick=()=>memberSheet(null,!me(),viewPeople);
   $("#pastep").onclick=pastePeopleSheet;
-  $("#invite").onclick=()=>copy(`Add your bank details for our settle-ups (one time, takes 30 seconds). Then you'll get a QR code to scan instead of typing account numbers:\n${location.origin+gpath("/people")}`,"Invite copied");
+  $("#invite").onclick=()=>copy(`Add your payment details for our settle-ups (one time, takes 30 seconds): a Vietnamese bank account for VND, and/or your PayPal.me username for other currencies. Then you'll get a QR or pay link instead of typing account numbers:\n${location.origin+gpath("/people")}`,"Invite copied");
 }
 
 const BANK_ALIASES={tcb:"970407",techcom:"970407",vcb:"970436",vietcom:"970436",ctg:"970415",vietin:"970415",bidv:"970418",agri:"970405",agribank:"970405",mb:"970422",mbbank:"970422",acb:"970416",vpb:"970432",vpbank:"970432",tpb:"970423",tpbank:"970423",stb:"970403",sacom:"970403",sacombank:"970403",vib:"970441",shb:"970443",hdb:"970437",hdbank:"970437",seab:"970440",seabank:"970440",ocb:"970448",msb:"970426",eib:"970431",exim:"970431",lpb:"970449",lpbank:"970449",cake:"546034",ubank:"546035",bvbank:"970454",vccb:"970454",namabank:"970428",nab:"970428",abb:"970425",abbank:"970425",bacabank:"970409",kienlong:"970452",klb:"970452",pvcom:"970412",shinhan:"970424",woori:"970457",saigonbank:"970400"};
@@ -404,6 +448,7 @@ function parsePeopleLines(text){
     const parts=l.split(/\s*[,\t|;]\s*/).map(x=>x.trim()).filter(Boolean);
     const out={name:parts.shift()||""};
     for(const t of parts){
+      if(!out.paypal&&(/@/.test(t)||/paypal\.me\//i.test(t))){out.paypal=t.replace(/^https?:\/\//i,"").replace(/^(www\.)?paypal\.me\//i,"").trim();continue}
       const b=!out.bin&&findBank(t);
       if(b){out.bin=b;continue}
       if(!out.acc&&/^[0-9][0-9 .-]{4,}$/.test(t)){out.acc=t.replace(/\D/g,"");continue}
@@ -414,16 +459,16 @@ function parsePeopleLines(text){
 }
 function pastePeopleSheet(){
   openSheet(`<h2>Paste a list of people</h2>
-    <p class="muted" style="margin-top:0">One person per line. Bank details are optional: <i>name, bank, account number, holder name</i>.</p>
-    <textarea id="pp" placeholder="Anh Pham, Techcombank, 19031234567, PHAM ANH&#10;Hoa Nguyen, VCB, 0011000123&#10;Nolan&#10;Huy"></textarea>
+    <p class="muted" style="margin-top:0">One person per line. Payment details are optional: <i>name, bank, account number, holder name</i> and/or <i>paypal.me/username</i>.</p>
+    <textarea id="pp" placeholder="Anh Pham, Techcombank, 19031234567, PHAM ANH, paypal.me/AnhPham&#10;Hoa Nguyen, VCB, 0011000123&#10;Mum, paypal.me/MumSmith&#10;Huy"></textarea>
     <div id="ppPrev" class="muted" style="margin-top:8px"></div>
     <div class="btns"><button class="btn primary" id="ppOk">Add people</button><button class="btn" data-close>Cancel</button></div>`);
-  const prev=()=>{const l=parsePeopleLines($("#pp").value);$("#ppPrev").innerHTML=l.length?l.map(x=>{const ex=matchMember(x.name);return `• ${esc(x.name)}${x.bin?` · ${esc(bankName(x.bin))}`:""}${x.acc?` · ${esc(x.acc)}`:""}${x.acc&&!x.bin?' <span style="color:var(--warn)">(bank not recognised)</span>':""}${ex?' <span class="pill grey">update</span>':""}`}).join("<br>"):""};
+  const prev=()=>{const l=parsePeopleLines($("#pp").value);$("#ppPrev").innerHTML=l.length?l.map(x=>{const ex=matchMember(x.name);return `• ${esc(x.name)}${x.bin?` · ${esc(bankName(x.bin))}`:""}${x.acc?` · ${esc(x.acc)}`:""}${x.paypal?` · PayPal ${esc(x.paypal)}`:""}${x.acc&&!x.bin?' <span style="color:var(--warn)">(bank not recognised)</span>':""}${ex?' <span class="pill grey">update</span>':""}`}).join("<br>"):""};
   $("#pp").oninput=prev;
   $("#ppOk").onclick=async()=>{
     const list=parsePeopleLines($("#pp").value);if(!list.length)return toast("Paste at least one name");
     const body=list.map(x=>{const ex=matchMember(x.name);const r={...(ex||{}),name:ex?ex.name:x.name};
-      if(x.acc&&x.bin){r.bin=x.bin;r.acc=x.acc}if(x.holder)r.holder=x.holder;return r});
+      if(x.acc&&x.bin){r.bin=x.bin;r.acc=x.acc}if(x.holder)r.holder=x.holder;if(x.paypal)r.paypal=x.paypal;return r});
     try{apply(await api(`/api/g/${GID}/members`,{method:"POST",body:{members:body}}));closeSheet();toast(`${list.length} saved`);viewPeople()}catch(e){toast(e.message)}
   };
 }
@@ -432,11 +477,15 @@ function memberSheet(id,isSelf,after){
   const known=BANKS.some(b=>b[1]===x.bin);
   openSheet(`<h2>${id?"Edit "+esc(x.name):isSelf?"Add yourself":"Add person"}</h2>
     <label>Name (same as in Splitwise helps)</label><input id="mName" value="${esc(x.name)}" maxlength="60" placeholder="Anh Pham">
-    <label>Bank</label><select id="mBank">${BANKS.map(([n,b])=>`<option value="${b}" ${b===x.bin?"selected":""}>${esc(n)}</option>`).join("")}<option value="other" ${x.bin&&!known?"selected":""}>Other bank (enter BIN)…</option></select>
+    <div class="sec" style="margin-top:16px">Vietnam bank · for VND (VietQR)</div>
+    <label style="margin-top:0">Bank</label><select id="mBank">${BANKS.map(([n,b])=>`<option value="${b}" ${b===x.bin?"selected":""}>${esc(n)}</option>`).join("")}<option value="other" ${x.bin&&!known?"selected":""}>Other bank (enter BIN)…</option></select>
     <div id="mBinW" style="display:${x.bin&&!known?"block":"none"}"><label>Bank BIN (6 digits)</label><input id="mBin" inputmode="numeric" maxlength="6" value="${esc(known?"":x.bin||"")}"></div>
     <label>Account number</label><input id="mAcc" inputmode="numeric" value="${esc(x.acc||"")}" placeholder="Only needed to receive money">
     <label>Account holder name</label><input id="mHolder" value="${esc(x.holder||"")}" placeholder="PHAM ANH" style="text-transform:uppercase">
     <p class="muted">Write the name the way your bank shows it: capitals, no accents.</p>
+    <div class="sec">PayPal · for AUD, USD, NZD and other currencies</div>
+    <label style="margin-top:0">PayPal.me username (or PayPal email)</label><input id="mPaypal" value="${esc(x.paypal||"")}" placeholder="e.g. AnhPham or paypal.me/AnhPham" autocapitalize="off" autocorrect="off">
+    <p class="muted">A username gives everyone a pay link and QR with the amount filled in. Find yours in the PayPal app under your profile, or make one at paypal.me.</p>
     <div class="btns"><button class="btn primary" id="mSave">Save</button><button class="btn" data-close>Cancel</button>${id?`<button class="btn ghost danger" id="mDel" style="margin-left:auto">Remove</button>`:""}</div>`);
   $("#mBank").onchange=()=>$("#mBinW").style.display=$("#mBank").value==="other"?"block":"none";
   $("#mSave").onclick=async()=>{
@@ -444,7 +493,7 @@ function memberSheet(id,isSelf,after){
     const bin=$("#mBank").value==="other"?$("#mBin").value:$("#mBank").value;
     const acc=$("#mAcc").value;
     try{
-      const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{member:{id:id||undefined,name,bin:acc?bin:"",acc,holder:strip($("#mHolder").value)}}});
+      const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{member:{id:id||undefined,name,bin:acc?bin:"",acc,holder:strip($("#mHolder").value),paypal:$("#mPaypal").value.trim().replace(/^https?:\/\//i,"").replace(/^(www\.)?paypal\.me\//i,"")}}});
       apply(d);if(isSelf&&d.members[0])ls.set("su_me_"+GID,d.members[0].id);
       closeSheet();toast("Saved");after();
     }catch(e){toast(e.message)}
@@ -454,10 +503,16 @@ function memberSheet(id,isSelf,after){
 
 /* ---------- event view ---------- */
 function messageFor(ev,p){
-  const f=mem(p.from),t=mem(p.to),note=ev.note||cleanNote(ev.name);
-  const link=location.origin+gpath("/e/"+ev.id);
-  if(!hasBank(t))return `Hi ${f.name}! For ${ev.name} you owe ${t.name} ${vnd(p.amt)}.\n${t.name} hasn't added bank details yet. They're listed here once added:\n${link}`;
-  return [`Hi ${f.name}! Settling up for ${ev.name}: please send ${t.name} ${vnd(p.amt)}.`,``,
+  const f=mem(p.from),t=mem(p.to),c=evCur(ev),note=ev.note||cleanNote(ev.name);
+  const link=location.origin+gpath("/e/"+ev.id),amt=money(p.amt,c);
+  if(!canReceive(t,c))return `Hi ${f.name}! For ${ev.name} you owe ${t.name} ${amt}.\n${t.name} hasn't added ${c==="VND"?"bank":"PayPal"} details yet. They'll show here once added:\n${link}`;
+  if(c!=="VND"){
+    const pl=paypalLink(t,p.amt,c);
+    return [`Hi ${f.name}! Settling up for ${ev.name}: please send ${t.name} ${amt} on PayPal.`,``,
+      pl?`Tap to pay (the amount is filled in):\n${pl}`:`PayPal: ${t.paypal}`,``,
+      `Choose "Friends and Family" so nobody pays a fee.`,``,`All payments for this trip: ${link}`].join("\n");
+  }
+  return [`Hi ${f.name}! Settling up for ${ev.name}: please send ${t.name} ${amt}.`,``,
     `Scan this QR in any bank app (amount and note are already filled in):`,vietqrLink(t,p.amt,note),``,
     `Or transfer manually: ${bankName(t.bin)} · ${t.acc}${t.holder?" · "+t.holder:""}${note?"\nNote: "+note:""}`,``,
     `All payments for this gathering: ${link}`].join("\n");
@@ -465,14 +520,24 @@ function messageFor(ev,p){
 const canRecord=(ev,p)=>!!(ev.swGroupId&&CONFIG.splitwise&&p.paid&&!p.swExpenseId&&(mem(p.from)||{}).swId&&(mem(p.to)||{}).swId);
 function payCard(ev,p,role){
   const mine=role==="out",incoming=role==="in";
-  const f=mem(p.from),t=mem(p.to),note=ev.note||cleanNote(ev.name);
-  let body;
-  if(!hasBank(t))body=`<div class="warnbox">${esc(t.name)} hasn't added bank details yet. Ask them to add them in <b>People</b>.</div>`;
-  else body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrFor(t,p.amt,note)}</div>
+  const f=mem(p.from),t=mem(p.to),c=evCur(ev),note=ev.note||cleanNote(ev.name);
+  const ok=canReceive(t,c),pl=c!=="VND"?paypalLink(t,p.amt,c):null;
+  let body,btns="";
+  if(!ok)body=`<div class="warnbox">${esc(t.name)} hasn't added ${c==="VND"?"bank details":"PayPal"} yet. Ask them to add it in <b>People</b>.</div>`;
+  else if(c==="VND")body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrFor(t,p.amt,note,c)}</div>
     <div class="bank"><b>${esc(t.holder||t.name)}</b>${esc(bankName(t.bin))}<br><code>${esc(t.acc)}</code>${note?`<div class="muted">Note: ${esc(note)}</div>`:""}</div></div>`;
+  else if(pl)body=`<div class="qrbox"><div class="qr" data-big="${p.id}">${qrFor(t,p.amt,note,c)}</div>
+    <div class="bank"><b>${esc(t.name)}</b>PayPal<br><code>paypal.me/${esc(t.paypal)}</code><div class="muted">Send as Friends and Family</div></div></div>`;
+  else body=`<div class="bank" style="margin-top:10px"><b>PayPal</b><code>${esc(t.paypal)}</code><div class="muted">Send ${esc(money(p.amt,c))} as Friends and Family</div></div>`;
+  if(ok){
+    if(pl&&!incoming)btns+=`<a class="btn small primary" href="${esc(pl)}" target="_blank" rel="noopener">Pay with PayPal</a>`;
+    if(c==="VND"||pl)btns+=`<button class="btn small ${pl&&!incoming?"":"primary"}" data-share="${p.id}">Share QR</button>`;
+    if(!mine&&!p.paid)btns+=`<button class="btn small" data-msg="${p.id}">Copy message</button>`;
+    if(!incoming)btns+=`<button class="btn small" data-acc="${p.id}">${c==="VND"?"Copy acct #":pl?"Copy link":"Copy email"}</button>`;
+  }
   const sw=canRecord(ev,p);
-  return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):incoming?esc(f.name)+" → you":esc(f.name)+" → "+esc(t.name)}</div><div class="money">${vnd(p.amt)}</div></div>${body}
-    <div class="btns">${hasBank(t)?`<button class="btn small primary" data-share="${p.id}">Share QR</button>`:""}${hasBank(t)&&!mine&&!p.paid?`<button class="btn small" data-msg="${p.id}">Copy message</button>`:""}${hasBank(t)&&!incoming?`<button class="btn small" data-acc="${p.id}">Copy acct #</button>`:""}
+  return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):incoming?esc(f.name)+" → you":esc(f.name)+" → "+esc(t.name)}</div><div class="money">${money(p.amt,c)}</div></div>${body}
+    <div class="btns">${btns}
     <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":incoming?"Got it ✓":"Mark paid ✓")}</button>
     ${sw?`<button class="btn small ghost" data-sw="${p.id}">Record in Splitwise</button>`:""}${p.swExpenseId?`<span class="pill" style="align-self:center">In Splitwise</span>`:""}</div></div>`;
 }
@@ -495,16 +560,43 @@ function expenseNets(x){
   for(const k in owed)n[k]=(n[k]||0)-owed[k];
   n[x.payer]=(n[x.payer]||0)+x.amt;return n;
 }
-function sumNets(list){const b={};for(const x of list)for(const [k,v] of Object.entries(expenseNets(x)))b[k]=(b[k]||0)+v;return b}
+// ctx = a gathering (or draft) with .cur (settle currency) and .rates {CUR: settle units per 1 CUR}
+const evCur=ctx=>(ctx&&ctx.cur)||"VND";
+const xCur=(x,ctx)=>x.cur||evCur(ctx);
+function rateOf(ctx,c){if(c===evCur(ctx))return 1;const r=ctx&&ctx.rates&&ctx.rates[c];return r>0?r:null}
+function convert(n,c,ctx){const r=rateOf(ctx,c);return r==null?null:Math.round(n*r*10**(D(evCur(ctx))-D(c)))}
+function convertNets(nets,c,ctx){
+  if(c===evCur(ctx))return nets;
+  const r=rateOf(ctx,c);if(r==null)return null;
+  const f=r*10**(D(evCur(ctx))-D(c)),raw={};for(const k in nets)raw[k]=nets[k]*f;
+  return roundBalances(raw);
+}
+const missingRates=(list,ctx)=>[...new Set(list.map(x=>xCur(x,ctx)).filter(c=>rateOf(ctx,c)==null))];
+function sumNets(list,ctx){
+  const b={};
+  for(const x of list){const n=convertNets(expenseNets(x),xCur(x,ctx),ctx);if(!n)continue;for(const [k,v] of Object.entries(n))b[k]=(b[k]||0)+v}
+  return b;
+}
+const RATES={};
+async function fetchRates(base){if(!RATES[base])RATES[base]=await api("/api/rates?base="+base);return RATES[base]}
+// Adds market rates for any currency in `curs` the ctx doesn't have yet. Returns true if it changed.
+async function fillRates(ctx,curs){
+  const need=[...new Set(curs)].filter(c=>c&&c!==evCur(ctx)&&rateOf(ctx,c)==null);
+  if(!need.length)return false;
+  const d=await fetchRates(evCur(ctx));
+  ctx.rates={...(ctx.rates||{})};
+  need.forEach(c=>{if(d.rates[c])ctx.rates[c]=+d.rates[c].toPrecision(6)});
+  return true;
+}
 function cleanBal(b){const o={};for(const k in b){const v=Math.round(b[k]);if(v)o[k]=v}return o}
 function remainingBalances(ev){
-  const b=sumNets(ev.expenses||[]);
+  const b=sumNets(ev.expenses||[],ev);
   for(const p of ev.payments)if(p.paid){b[p.from]=(b[p.from]||0)+p.amt;b[p.to]=(b[p.to]||0)-p.amt}
   return cleanBal(b);
 }
 const makePlan=(bal,mode,hub)=>mode==="hub"&&hub?settleHub(bal,hub):settleDirect(bal);
 const planOf=ev=>makePlan(remainingBalances(ev),ev.mode,ev.hub);
-const costTotal=list=>list.filter(x=>x.kind!=="net").reduce((s,x)=>s+x.amt,0);
+const costTotal=(list,ctx)=>list.filter(x=>x.kind!=="net").reduce((s,x)=>s+(convert(x.amt,xCur(x,ctx),ctx)||0),0);
 function splitLabel(x,nameOf){
   if(x.kind==="net")return "Imported balances";
   const who=nameOf(x.payer);
@@ -548,11 +640,14 @@ function peopleSheet(ev){
 function expenseSheet(ev,orig){
   const people=eventPeople(ev);
   const mine=me()&&G.members.some(m=>m.id===me().id)?me().id:null;
-  const E=orig?JSON.parse(JSON.stringify(orig)):{id:newId(),kind:"split",desc:"",amt:0,payer:mine||(people[0]||{}).id,parts:people.map(p=>({id:p.id,w:p.w}))};
+  const lastCur=ls.get("su_lastcur_"+ev.id,null);
+  const E=orig?JSON.parse(JSON.stringify(orig)):{id:newId(),kind:"split",cur:lastCur&&CURRENCIES[lastCur]?lastCur:evCur(ev),desc:"",amt:0,payer:mine||(people[0]||{}).id,parts:people.map(p=>({id:p.id,w:p.w}))};
+  if(!E.cur)E.cur=evCur(ev);
+  const usedCurs=[...new Set([evCur(ev),...ev.expenses.map(x=>xCur(x,ev))])];
   if(E.kind==="net"){
     const nets=Object.entries(E.nets).sort((a,b)=>b[1]-a[1]);
     openSheet(`<h2>${esc(E.desc)}</h2><p class="muted" style="margin-top:0">Balances imported from Splitwise. They can't be edited here, only removed.</p>
-      ${nets.map(([id,v])=>`<div class="bal"><span>${esc(nm(id))}</span><span class="${v>0?"pos":"neg"}">${v>0?"gets ":"owes "}${vnd(Math.abs(v))}</span></div>`).join("")}
+      ${nets.map(([id,v])=>`<div class="bal"><span>${esc(nm(id))}</span><span class="${v>0?"pos":"neg"}">${v>0?"gets ":"owes "}${money(Math.abs(v),xCur(E,ev))}</span></div>`).join("")}
       <div class="btns"><button class="btn" data-close>Close</button><button class="btn ghost danger" id="xDel" style="margin-left:auto">Remove</button></div>`);
     $("#xDel").onclick=()=>deleteExpense(ev,E);return;
   }
@@ -564,29 +659,38 @@ function expenseSheet(ev,orig){
     const on=id=>E.parts.find(p=>p.id===id);
     openSheet(`<h2>${orig?"Edit cost":"Add a cost"}</h2>
       <label style="margin-top:0">What for?</label><input id="xDesc" value="${esc(E.desc)}" maxlength="80" placeholder="e.g. Steak, beer, taxi">
-      <div class="row" style="gap:10px"><div class="grow"><label>Amount</label><input id="xAmt" inputmode="decimal" value="${E.amt?E.amt.toLocaleString("vi-VN"):""}" placeholder="2.75tr or 350k"></div>
-        <div class="grow"><label>Paid by</label><select id="xPayer">${[...cands.map(mem),...others].filter(Boolean).map(m=>`<option value="${m.id}" ${m.id===E.payer?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div></div>
+      <div class="row" style="gap:10px;align-items:flex-end"><div style="flex:0 0 96px"><label>Currency</label><select id="xCur">${curOpts(E.cur,usedCurs).replace(/ · [^<]+</g,"<")}</select></div><div class="grow"><label>Amount</label><input id="xAmt" inputmode="decimal" value="${fmtInput(E.amt,E.cur)}" placeholder="${D(E.cur)?"125.50":"2.75tr or 350k"}"></div></div>
+      <div class="row" style="gap:10px"><div class="grow"><label>Paid by</label><select id="xPayer">${[...cands.map(mem),...others].filter(Boolean).map(m=>`<option value="${m.id}" ${m.id===E.payer?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div></div>
       <div class="muted" id="xAmtHint" style="margin-top:4px"></div>
       <label>Split</label><div class="seg"><button type="button" data-k="split" class="${E.kind==="split"?"on":""}">Equally / by shares</button><button type="button" data-k="exact" class="${E.kind==="exact"?"on":""}">Exact amounts</button></div>
       <div id="xRows" style="margin-top:6px">${cands.map(id=>{const p=on(id);return E.kind==="split"
         ?`<div class="mini"><label class="row grow" style="margin:0;color:var(--ink);font-size:15px;gap:10px"><input type="checkbox" data-on="${id}" ${p?"checked":""} style="width:20px;height:20px;flex:none"> <span>${esc(nm(id))}</span></label><input data-w="${id}" type="number" inputmode="decimal" min="0.5" max="20" step="0.5" value="${p?p.w:wOf(id)}" style="width:62px;padding:6px" ${p?"":"disabled"} aria-label="shares"><span class="amt" data-sh="${id}" style="min-width:92px;text-align:right"></span></div>`
-        :`<div class="mini"><div class="grow">${esc(nm(id))}</div><input data-ex="${id}" inputmode="decimal" value="${p&&p.amt?p.amt.toLocaleString("vi-VN"):""}" placeholder="0" style="width:130px;padding:6px;text-align:right"></div>`}).join("")}</div>
+        :`<div class="mini"><div class="grow">${esc(nm(id))}</div><input data-ex="${id}" inputmode="decimal" value="${p&&p.amt?fmtInput(p.amt,E.cur):""}" placeholder="0" style="width:130px;padding:6px;text-align:right"></div>`}).join("")}</div>
       ${others.length?`<div class="row" style="margin-top:8px"><select id="xAddP" class="grow"><option value="">+ Someone else was in on this…</option>${others.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select></div>`:""}
       <div class="muted" id="xFoot" style="margin-top:8px"></div>
       <div class="btns"><button class="btn primary" id="xSave">Save</button><button class="btn" data-close>Cancel</button>${orig?`<button class="btn ghost danger" id="xDel" style="margin-left:auto">Delete</button>`:""}</div>`);
-    const readAmt=()=>{E.amt=parseAmount($("#xAmt").value)};
+    const readAmt=()=>{E.amt=parseMoney($("#xAmt").value,E.cur)};
+    const M=n=>money(n,E.cur);
     const hints=()=>{
-      $("#xAmtHint").textContent=E.amt?vnd(E.amt):"";
+      let h=E.amt?M(E.amt):"";
+      if(E.amt&&E.cur!==evCur(ev)){const r=rateOf(ev,E.cur);h+=r?` ≈ ${money(convert(E.amt,E.cur,ev),evCur(ev))} at 1 ${E.cur} = ${r} ${evCur(ev)}`:` · converted to ${evCur(ev)} at today's rate when saved`}
+      $("#xAmtHint").textContent=h;
       if(E.kind==="split"){
         const sh=E.amt&&E.parts.length?shareSplit(E.amt,E.parts):{};
-        document.querySelectorAll("[data-sh]").forEach(s=>s.textContent=sh[s.dataset.sh]!=null?vnd(sh[s.dataset.sh]):"");
+        document.querySelectorAll("[data-sh]").forEach(s=>s.textContent=sh[s.dataset.sh]!=null?M(sh[s.dataset.sh]):"");
         $("#xFoot").textContent=E.parts.length?`${E.parts.length} ${E.parts.length>1?"people":"person"} · ${E.parts.reduce((s,p)=>s+p.w,0)} shares`:"Tick at least one person";
       }else{
         const sum=E.parts.reduce((s,p)=>s+(p.amt||0),0),left=E.amt-sum;
-        $("#xFoot").innerHTML=!E.amt?"Enter the total first":left===0?`<span class="pos">Adds up ✓</span>`:`<span class="neg">${left>0?vnd(left)+" left to assign":vnd(-left)+" too much"}</span>`;
+        $("#xFoot").innerHTML=!E.amt?"Enter the total first":left===0?`<span class="pos">Adds up ✓</span>`:`<span class="neg">${left>0?M(left)+" left to assign":M(-left)+" too much"}</span>`;
       }
     };
     $("#xAmt").oninput=()=>{readAmt();hints()};
+    $("#xCur").onchange=()=>{
+      const old=E.cur,n=$("#xCur").value;E.cur=n;
+      const conv=v=>Math.round(v*10**(D(n)-D(old)));
+      E.amt=conv(E.amt);if(E.kind==="exact")E.parts=E.parts.map(p=>({...p,amt:conv(p.amt)}));
+      E.desc=$("#xDesc").value;render();
+    };
     $("#xDesc").oninput=()=>E.desc=$("#xDesc").value;
     $("#xPayer").onchange=()=>{E.payer=$("#xPayer").value;if(!cands.includes(E.payer)){cands.push(E.payer);render()}};
     document.querySelectorAll("[data-k]").forEach(b=>b.onclick=()=>{
@@ -605,13 +709,13 @@ function expenseSheet(ev,orig){
     });
     document.querySelectorAll("[data-w]").forEach(i=>i.oninput=()=>{const p=E.parts.find(x=>x.id===i.dataset.w);const v=parseFloat(i.value);if(p&&v>0)p.w=Math.min(20,v);hints()});
     document.querySelectorAll("[data-ex]").forEach(i=>i.oninput=()=>{
-      const id=i.dataset.ex,a=parseAmount(i.value);
+      const id=i.dataset.ex,a=parseMoney(i.value,E.cur);
       E.parts=E.parts.filter(p=>p.id!==id);if(a>0)E.parts.push({id,amt:a});
       E.parts.sort((x,y)=>cands.indexOf(x.id)-cands.indexOf(y.id));hints();
     });
     const ap=$("#xAddP");if(ap)ap.onchange=()=>{if(!ap.value)return;cands.push(ap.value);if(E.kind==="split")E.parts.push({id:ap.value,w:1});render()};
     $("#xSave").onclick=async()=>{
-      readAmt();E.desc=$("#xDesc").value.trim();
+      readAmt();E.desc=$("#xDesc").value.trim();ls.set("su_lastcur_"+ev.id,E.cur);
       if(!E.amt)return toast("Enter the amount");
       if(!E.parts.length)return toast(E.kind==="split"?"Tick who shares this":"Enter who owes what");
       if(E.kind==="exact"&&E.parts.reduce((s,p)=>s+p.amt,0)!==E.amt)return toast("The amounts don't add up to the total");
@@ -627,7 +731,8 @@ function expenseSheet(ev,orig){
 async function saveExpenses(ev,list){
   const next={...ev,expenses:[...ev.expenses.filter(x=>!list.some(n=>n.id===x.id)),...list]};
   try{
-    apply(await api(`/api/g/${GID}/events/${ev.id}/expenses`,{method:"POST",body:{expenses:list,payments:planOf(next)}}));
+    try{await fillRates(next,list.map(x=>xCur(x,next)))}catch(e){toast("Couldn't get exchange rates. Enter them under Currencies.")}
+    apply(await api(`/api/g/${GID}/events/${ev.id}/expenses`,{method:"POST",body:{expenses:list,payments:planOf(next),rates:next.rates||{}}}));
     closeSheet();toast(list.length>1?`${list.length} costs added`:"Saved");viewEvent(ev.id);
   }catch(e){toast(e.message)}
 }
@@ -639,15 +744,16 @@ async function deleteExpense(ev,x){
   }catch(e){toast(e.message)}
 }
 function pasteCostsSheet(ev){
-  openSheet(`<h2>Paste costs</h2><p class="muted" style="margin-top:0">One per line, e.g. <i>Beer 438k paid by Huy</i>, or <i>for Anh, Nolan</i> to split between only some people.</p>
+  openSheet(`<h2>Paste costs</h2><p class="muted" style="margin-top:0">One per line, e.g. <i>Beer 438k paid by Huy</i> or <i>Hotel US$450 paid by Anh</i>. Add <i>for Anh, Nolan</i> to split between only some people. No currency means ${esc(ls.get("su_lastcur_"+ev.id,null)||evCur(ev))}.</p>
     <textarea id="pcT" style="min-height:160px" placeholder="Steak 2.75tr paid by Anh&#10;Beer 438k paid by Huy for Anh, Nolan x2, Huy&#10;Chau owes Hoa 50k"></textarea>
     <div id="pcInfo" class="muted" style="margin-top:8px"></div>
     <div class="btns"><button class="btn primary" id="pcOk">Add costs</button><button class="btn" data-close>Cancel</button></div>`);
   const crowd=eventPeople(ev).map(p=>({name:nm(p.id),w:p.w}));
-  const prev=()=>{const r=parseCostsText($("#pcT").value,crowd);$("#pcInfo").innerHTML=r.exps.length?`${r.exps.length} cost${r.exps.length>1?"s":""} · ${vnd(costTotal(r.exps))}${r.bad.length?` · <span class="neg">can't read: ${esc(r.bad.slice(0,2).join(" · "))}</span>`:""}`:(r.bad.length?`<span class="neg">Can't read: ${esc(r.bad.slice(0,2).join(" · "))}</span>`:"")};
+  const defCur=ls.get("su_lastcur_"+ev.id,null)||evCur(ev);
+  const prev=()=>{const r=parseCostsText($("#pcT").value,crowd,defCur);$("#pcInfo").innerHTML=r.exps.length?`${r.exps.length} cost${r.exps.length>1?"s":""}${[...new Set(r.exps.map(x=>x.cur))].length>1||r.exps[0].cur!==evCur(ev)?` in ${[...new Set(r.exps.map(x=>x.cur))].join(", ")}`:` · ${money(costTotal(r.exps,ev),evCur(ev))}`}${r.bad.length?` · <span class="neg">can't read: ${esc(r.bad.slice(0,2).join(" · "))}</span>`:""}`:(r.bad.length?`<span class="neg">Can't read: ${esc(r.bad.slice(0,2).join(" · "))}</span>`:"")};
   $("#pcT").oninput=prev;
   $("#pcOk").onclick=async()=>{
-    const r=parseCostsText($("#pcT").value,crowd);
+    const r=parseCostsText($("#pcT").value,crowd,defCur);
     if(!r.exps.length)return toast("Nothing to add yet");
     try{
       const ids=await resolveNames(namesIn(r.exps));
@@ -665,41 +771,57 @@ function viewEvent(eid){
   const mineIn=m?ev.payments.filter(p=>p.to===m.id):[];
   const others=ev.payments.filter(p=>!(m&&(p.from===m.id||p.to===m.id)));
   const done=ev.payments.filter(p=>p.paid).length;
-  const open=ev.payments.filter(p=>!p.paid&&hasBank(mem(p.to)));
+  const open=ev.payments.filter(p=>!p.paid&&canReceive(mem(p.to),evCur(ev)));
   const exps=ledger?ev.expenses.slice().sort((a,b)=>a.created-b.created):[];
-  const spent=ledger?costTotal(exps):0;
-  const before=ledger?cleanBal(sumNets(exps)):{};
+  const C=evCur(ev),M=n=>money(n,C);
+  const spent=ledger?costTotal(exps,ev):0;
+  const before=ledger?cleanBal(sumNets(exps,ev)):{};
+  const usedCurs=ledger?[...new Set(exps.map(x=>xCur(x,ev)))]:[];
+  const foreign=usedCurs.filter(c=>c!==C),missing=ledger?missingRates(exps,ev):[];
+  const anyPaid=ev.payments.some(p=>p.paid);
   const left=ledger?remainingBalances(ev):{};
   const people=ledger?[...new Set([...eventPeople(ev).map(p=>p.id),...Object.keys(before)])].filter(id=>mem(id)):[];
   const allSquare=ledger&&exps.length&&!Object.keys(left).length;
   const hubOpts=people.map(id=>`<option value="${id}" ${id===ev.hub?"selected":""}>${esc(nm(id))}</option>`).join("");
   $("#app").innerHTML=`
   ${header(ev.name,gpath(),"Gatherings")}
-  <div class="muted" style="margin:-6px 2px 12px">${fmtDate(ev.created)}${ledger?` · ${vnd(spent)} spent`:""} · ${done}/${ev.payments.length} payments done${ev.note?` · note “${esc(ev.note)}”`:""}</div>
+  <div class="muted" style="margin:-6px 2px 12px">${fmtDate(ev.created)}${ledger?` · ${M(spent)} spent`:""} · ${done}/${ev.payments.length} payments done${C!=="VND"?` · settles in ${C} via PayPal`:""}${ev.note&&C==="VND"?` · note “${esc(ev.note)}”`:""}</div>
+  ${missing.length?`<div class="warnbox" style="margin:0 0 12px">Costs in ${missing.join(", ")} aren't counted yet because their exchange rate is missing. <a href="#" id="fixRates">Get rates</a></div>`:""}
   ${whoAmICard()}
   ${allSquare?`<div class="infobox">Everyone is settled up. 🎉</div>`:""}
   ${m&&mineOut.length?`<div class="sec">You pay</div>${mineOut.map(p=>payCard(ev,p,"out")).join("")}`:""}
   ${m&&ev.payments.length&&!mineOut.length&&!mineIn.length&&!allSquare?`<div class="infobox">You're all square for this one. 🎉</div>`:""}
   ${ledger?`
-  <div class="sec">Costs · ${vnd(spent)}</div>
+  <div class="sec">Costs · ${M(spent)}</div>
   <div class="card"><div class="list">
-    ${exps.length?exps.map(x=>`<a class="item" href="#" data-x="${x.id}"><div class="info"><div class="t">${esc(x.desc)}</div><div class="s">${esc(splitLabel(x,nm))}</div></div><span class="amt">${x.kind==="net"?"":vnd(x.amt)}</span></a>`).join(""):`<div class="empty">No costs yet. Add the first one, like dinner, drinks or a taxi.</div>`}
+    ${exps.length?exps.map(x=>`<a class="item" href="#" data-x="${x.id}"><div class="info"><div class="t">${esc(x.desc)}</div><div class="s">${esc(splitLabel(x,nm))}</div></div><span class="amt" style="text-align:right">${x.kind==="net"?"":money(x.amt,xCur(x,ev))}${x.kind!=="net"&&xCur(x,ev)!==C&&rateOf(ev,xCur(x,ev))?`<div class="muted" style="font-weight:400">≈ ${M(convert(x.amt,xCur(x,ev),ev))}</div>`:""}</span></a>`).join(""):`<div class="empty">No costs yet. Add the first one, like dinner, drinks or a taxi.</div>`}
   </div>
   <div class="btns"><button class="btn primary" id="addX">+ Add cost</button><button class="btn" id="pasteX">Paste costs</button><button class="btn ghost" id="whoX">Who's here (${eventPeople(ev).length})</button></div></div>
   ${exps.length?`<div class="sec">Balances</div>
   <div class="card">${people.filter(id=>before[id]||left[id]).sort((a,b)=>(before[b]||0)-(before[a]||0)).map(id=>{const v=before[id]||0,l=left[id]||0;
-    return `<div class="bal"><span>${esc(nm(id))}</span><span>${!l?`<span class="pill grey">settled ✓</span>`:`<span class="${l>0?"pos":"neg"}">${l>0?"gets ":"owes "}${vnd(Math.abs(l))}</span>`}${l!==v&&l?` <span class="muted">of ${vnd(Math.abs(v))}</span>`:""}</span></div>`}).join("")||'<div class="empty">Nobody owes anything.</div>'}
+    return `<div class="bal"><span>${esc(nm(id))}</span><span>${!l?`<span class="pill grey">settled ✓</span>`:`<span class="${l>0?"pos":"neg"}">${l>0?"gets ":"owes "}${M(Math.abs(l))}</span>`}${l!==v&&l?` <span class="muted">of ${M(Math.abs(v))}</span>`:""}</span></div>`}).join("")||'<div class="empty">Nobody owes anything.</div>'}
     <label>How should people pay?</label>
     <div class="seg"><button data-mode="direct" class="${ev.mode!=="hub"?"on":""}">Directly to each other</button><button data-mode="hub" class="${ev.mode==="hub"?"on":""}">Through one person</button></div>
     ${ev.mode==="hub"?`<select id="hubSel" style="margin-top:8px">${hubOpts}</select>`:""}
-  </div>`:""}`:""}
-  ${m&&mineIn.length?`<div class="sec">You receive · ${vnd(mineIn.filter(p=>!p.paid).reduce((x,p)=>x+p.amt,0))} open</div>${!hasBank(m)?`<div class="warnbox" style="margin:0 0 12px">Add your bank details in People to get QR codes.</div>`:""}${mineIn.map(p=>payCard(ev,p,"in")).join("")}`:""}
+  </div>`:""}
+  <div class="sec">Currencies</div>
+  <div class="card">
+    <label style="margin-top:0">Settle up in</label>
+    <select id="setCur" ${anyPaid?"disabled":""}>${curOpts(C,usedCurs)}</select>
+    <p class="muted" style="margin:6px 0 0">${C==="VND"?"Payments use VietQR bank transfers.":"Payments use PayPal. Everyone receiving money needs a PayPal.me username in People."}${anyPaid?" Locked because some payments are already marked paid.":""}</p>
+    ${foreign.length?`<label>Exchange rates</label>${foreign.map(c=>`<div class="mini"><div class="grow">1 ${c} =</div><input data-rate="${c}" inputmode="decimal" value="${rateOf(ev,c)??""}" placeholder="rate" style="width:120px;padding:6px;text-align:right"><span style="width:40px">${C}</span></div>`).join("")}
+      <div class="btns"><button class="btn small" id="saveRates">Save rates</button><button class="btn small ghost" id="mktRates">Use today's market rates</button></div>
+      <p class="muted">Set a rate to match what your card actually charged. <a href="https://www.exchangerate-api.com" target="_blank" rel="noopener">Rates by Exchange Rate API</a></p>`:`<p class="muted" style="margin-bottom:0">Costs can be in any currency. Pick one when adding a cost and it's converted to ${C}.</p>`}
+  </div>`:""}
+  ${m&&mineIn.length?`<div class="sec">You receive · ${M(mineIn.filter(p=>!p.paid).reduce((x,p)=>x+p.amt,0))} open</div>${!canReceive(m,C)?`<div class="warnbox" style="margin:0 0 12px">Add your ${C==="VND"?"bank details":"PayPal"} in People so people can pay you.</div>`:""}${mineIn.map(p=>payCard(ev,p,"in")).join("")}`:""}
   ${others.length?`<div class="sec">${m?"Everyone else":"Payments"}</div>${others.map(p=>payCard(ev,p,"other")).join("")}`:""}
   <div class="btns">${open.length>1?`<button class="btn small" id="copyAll">Copy all open messages</button>`:""}<button class="btn small" id="shareEv">Copy link</button><button class="btn small ghost" id="editEv">Edit</button><button class="btn small ghost danger" id="delEv">Delete</button></div>`;
   bindWhoAmI(()=>viewEvent(eid));
   const byId=id=>ev.payments.find(p=>p.id===id);
   document.querySelectorAll("[data-msg]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.msg);copy(messageFor(ev,p),`Message for ${nm(p.from)} copied`)});
-  document.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>copy(mem(byId(b.dataset.acc).to).acc,"Account number copied"));
+  document.querySelectorAll("[data-acc]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.acc),t=mem(p.to);
+    if(C==="VND")return copy(t.acc,"Account number copied");
+    const pl=paypalLink(t,p.amt,C);copy(pl||t.paypal,pl?"PayPal link copied":"PayPal email copied")});
   document.querySelectorAll("[data-paid]").forEach(b=>b.onclick=async()=>{
     const p=byId(b.dataset.paid);b.disabled=true;
     try{
@@ -711,12 +833,12 @@ function viewEvent(eid){
   document.querySelectorAll("[data-sw]").forEach(b=>b.onclick=()=>recordInSplitwise(ev,byId(b.dataset.sw)));
   document.querySelectorAll("[data-big]").forEach(b=>b.onclick=()=>{
     const p=byId(b.dataset.big),t=mem(p.to);
-    $("#bigQr").innerHTML=qrFor(t,p.amt,ev.note||cleanNote(ev.name));
+    $("#bigQr").innerHTML=qrFor(t,p.amt,ev.note||cleanNote(ev.name),C);
     $("#bigCap").innerHTML=`${esc(nm(p.from))} → ${esc(t.holder||t.name)}<div style="margin-top:12px"><button class="btn primary" id="bigShare">Share QR</button></div>`;
-    $("#bigShare").onclick=e=>{e.stopPropagation();shareQr(t,p.amt,ev.note||cleanNote(ev.name),nm(p.from))};
+    $("#bigShare").onclick=e=>{e.stopPropagation();shareQr(t,p.amt,ev.note||cleanNote(ev.name),nm(p.from),C)};
     $("#overlay").classList.add("on");
   });
-  document.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.share);shareQr(mem(p.to),p.amt,ev.note||cleanNote(ev.name),nm(p.from))});
+  document.querySelectorAll("[data-share]").forEach(b=>b.onclick=()=>{const p=byId(b.dataset.share);shareQr(mem(p.to),p.amt,ev.note||cleanNote(ev.name),nm(p.from),C)});
   if(ledger){
     document.querySelectorAll("[data-x]").forEach(a=>a.onclick=e=>{e.preventDefault();expenseSheet(ev,ev.expenses.find(x=>x.id===a.dataset.x))});
     $("#addX").onclick=()=>expenseSheet(ev,null);
@@ -729,6 +851,22 @@ function viewEvent(eid){
       setMode(mode,hub);
     });
     const hs=$("#hubSel");if(hs)hs.onchange=()=>setMode("hub",hs.value);
+    const saveEv=async(patch)=>{const e2={...ev,...patch};apply(await api(`/api/g/${GID}/events/${eid}`,{method:"POST",body:{...patch,payments:planOf(e2)}}));viewEvent(eid)};
+    const sc=$("#setCur");if(sc)sc.onchange=async()=>{
+      const n=sc.value;sc.disabled=true;
+      try{const e2={...ev,cur:n,rates:{}};await fillRates(e2,usedCurs);
+        const hub=ev.hub;await saveEv({cur:n,rates:e2.rates,hub});toast(`Now settling in ${n}`)}
+      catch(e){toast(e.message);sc.disabled=false}
+    };
+    const sr=$("#saveRates");if(sr)sr.onclick=async()=>{
+      const r={...(ev.rates||{})};let bad=false;
+      document.querySelectorAll("[data-rate]").forEach(i=>{const v=parseFloat(String(i.value).replace(",","."));if(v>0)r[i.dataset.rate]=v;else bad=true});
+      if(bad)return toast("Enter a rate above 0 for each currency");
+      try{await saveEv({rates:r});toast("Rates saved")}catch(e){toast(e.message)}
+    };
+    const getMkt=async()=>{try{delete RATES[C];const e2={...ev,rates:{}};await fillRates(e2,foreign.length?foreign:missing);await saveEv({rates:{...(ev.rates||{}),...e2.rates}});toast("Updated to today's rates")}catch(e){toast("Couldn't get rates: "+e.message)}};
+    const mr=$("#mktRates");if(mr)mr.onclick=getMkt;
+    const fr=$("#fixRates");if(fr)fr.onclick=e=>{e.preventDefault();getMkt()};
   }
   const ca=$("#copyAll");if(ca)ca.onclick=()=>copy(open.map(p=>messageFor(ev,p)).join("\n\n— — —\n\n"),`${open.length} messages copied`);
   $("#shareEv").onclick=()=>copy(`${ev.name}: costs and who owes what. Open it, pick your name, and scan your QR:\n${location.origin+gpath("/e/"+ev.id)}`,"Link copied");
@@ -749,7 +887,7 @@ function pinFlow(cb){
 function recordInSplitwise(ev,p){
   pinFlow(async pin=>{
     try{
-      const d=await api("/api/splitwise/payment",{method:"POST",pin,body:{swGroupId:ev.swGroupId,fromSwId:mem(p.from).swId,toSwId:mem(p.to).swId,amount:p.amt,description:`Settle up · ${ev.name}`}});
+      const d=await api("/api/splitwise/payment",{method:"POST",pin,body:{swGroupId:ev.swGroupId,fromSwId:mem(p.from).swId,toSwId:mem(p.to).swId,amount:p.amt,currency:evCur(ev),description:`Settle up · ${ev.name}`}});
       apply(await api(`/api/g/${GID}/events/${ev.id}/recorded`,{method:"POST",body:{pid:p.id,swExpenseId:d.expenseId||"1"}}));
       toast("Recorded in Splitwise");viewEvent(ev.id);
     }catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");toast(e.message)}
@@ -782,11 +920,13 @@ function parseList(str,known){
   return [...out].map(([name,w])=>({name,w}));
 }
 // Text -> costs keyed by NAME (ids are filled in later by resolveNames/mapExpense).
-function parseCostsText(text,crowd){
-  const AMT="(\\d[\\d.,]*\\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?)\\s*(?:₫|đ|vnd|vnđ)?";
+function parseCostsText(text,crowd,defCur="VND"){
+  const CC="(?:VND|AUD|USD|NZD|EUR|GBP|SGD|CAD|HKD|THB|JPY|KRW)";
+  const AMT="((?:"+CC+"\\s?|US\\$|AU\\$|A\\$|NZ\\$|S\\$|C\\$|HK\\$|\\$|€|£|¥|₩|฿)?\\d[\\d.,]*\\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?\\s*(?:₫|đ|vnđ|"+CC+")?)";
+  const amtOf=t=>{const c=detectCur(t)||defCur;return {c,a:parseMoney(t,c)}};
   const reOwe=new RegExp("^(.+?) (?:owes?|nợ|no|->|→|=>) (.+?)\\s*[:\\-–]?\\s*(?:₫|đ|vnd)?\\s*"+AMT+"$","i");
-  const rePaidBy=new RegExp("^(.*?)\\s*[:\\-–]?\\s*(?:₫|đ)?"+AMT+" (?:paid by|by|do|trả bởi|tra boi) (.+?)(?: (?:for|split|chia|cho) (.+))?$","i");
-  const rePaid=new RegExp("^(.+?) (?:paid|trả|tra) (?:₫|đ)?"+AMT+"(?: (?:for|on|cho) (.+?))?(?: (?:split|chia) (.+))?$","i");
+  const rePaidBy=new RegExp("^(.*?)\\s*[:\\-–]?\\s*"+AMT+" (?:paid by|by|do|trả bởi|tra boi) (.+?)(?: (?:for|split|chia|cho) (.+))?$","i");
+  const rePaid=new RegExp("^(.+?) (?:paid|trả|tra) "+AMT+"(?: (?:for|on|cho) (.+?))?(?: (?:split|chia) (.+))?$","i");
   const rePeople=/^(?:people|who|everyone|ai|mọi người|moi nguoi)\s*:\s*(.+)$/i;
   const lines=String(text||"").split(/\n+/).map(x=>x.replace(/\s+/g," ").trim()).filter(Boolean);
   const known=crowd.map(c=>c.name);
@@ -797,17 +937,17 @@ function parseCostsText(text,crowd){
   for(const l of lines){
     if(rePeople.test(l))continue;
     let m=l.match(reOwe);
-    if(m){const a=parseAmount(m[3]),f=canonName(m[1],known),t=canonName(m[2],known);
-      if(a&&f&&t&&f!==t){exps.push({id:newId(),kind:"exact",desc:`${f} owes ${t}`,amt:a,payer:t,parts:[{id:f,amt:a}],created:t0+exps.length});continue}}
+    if(m){const {a,c}=amtOf(m[3]),f=canonName(m[1],known),t=canonName(m[2],known);
+      if(a&&f&&t&&f!==t){exps.push({id:newId(),kind:"exact",cur:c,desc:`${f} owes ${t}`,amt:a,payer:t,parts:[{id:f,amt:a}],created:t0+exps.length});continue}}
     let payer=null,amt=null,list=null,desc="";
     if((m=l.match(rePaidBy))){desc=m[1];amt=m[2];payer=m[3];list=m[4]||null}
     else if((m=l.match(rePaid))){payer=m[1];amt=m[2];desc=m[3]||"";list=m[4]||null}
-    const a=amt&&parseAmount(amt);
+    const {a,c}=amt?amtOf(amt):{a:0,c:defCur};
     if(a&&payer){
       payer=canonName(payer,known);
       const parts=list?parseList(list,known):everyone;
       if(!parts.length){bad.push(l);continue}
-      exps.push({id:newId(),kind:"split",desc:(desc||"").replace(/[\s:\-–]+$/,"").trim()||"Cost",amt:a,payer,parts:parts.map(p=>({id:p.name,w:p.w})),created:t0+exps.length});
+      exps.push({id:newId(),kind:"split",cur:c,desc:(desc||"").replace(/[\s:\-–]+$/,"").trim()||"Cost",amt:a,payer,parts:parts.map(p=>({id:p.name,w:p.w})),created:t0+exps.length});
       continue;
     }
     bad.push(l);
@@ -842,19 +982,20 @@ function csvToDraft(text){
   for(const r of rows.slice(1)){
     const desc=(r[1]||"").trim();
     if(!desc||/^total balance$/i.test(desc))continue;
-    if(r[ci])cur.add(r[ci].trim());
-    const cost=Math.round(parseFloat(r[3])||0);
-    const vals=names.map((n,i)=>parseFloat(r[ci+1+i])||0);
+    const c=CURRENCIES[(r[ci]||"").trim().toUpperCase()]?(r[ci]||"").trim().toUpperCase():"VND";cur.add(c);
+    const f=10**D(c);
+    const cost=Math.round((parseFloat(r[3])||0)*f);
+    const vals=names.map((n,i)=>(parseFloat(r[ci+1+i])||0)*f);
     if(!vals.some(v=>Math.abs(v)>=0.5))continue;
     const pos=names.filter((n,i)=>vals[i]>=0.5);
     if(pos.length===1&&cost>0){
       const payer=pos[0],parts=[];let sum=0;
       names.forEach((n,i)=>{if(n!==payer&&vals[i]<=-0.5){const a=Math.round(-vals[i]);parts.push({id:n,amt:a});sum+=a}});
       const own=cost-sum;
-      if(own>=0){if(own>0)parts.push({id:payer,amt:own});exps.push({id:newId(),kind:"exact",desc,amt:cost,payer,parts,created:t0+exps.length});continue}
+      if(own>=0){if(own>0)parts.push({id:payer,amt:own});exps.push({id:newId(),kind:"exact",cur:c,desc,amt:cost,payer,parts,created:t0+exps.length});continue}
     }
     const nets=roundBalances(Object.fromEntries(names.map((n,i)=>[n,vals[i]])));
-    if(Object.keys(nets).length)exps.push({id:newId(),kind:"net",desc,amt:cost,nets,created:t0+exps.length});
+    if(Object.keys(nets).length)exps.push({id:newId(),kind:"net",cur:c,desc,amt:cost,nets,created:t0+exps.length});
   }
   if(!exps.length)throw new Error("No costs found in this file");
   return {exps,people:names.map(name=>({name,w:1})),currencies:[...cur]};
@@ -863,7 +1004,7 @@ function csvToDraft(text){
 /* ---------- new gathering ---------- */
 let NEW=null;
 function viewNew(){
-  if(!NEW||NEW.gid!==GID)NEW={gid:GID,name:"",note:"",source:"blank",crowd:new Map(G.members.map(m=>[m.id,1])),typed:"",draft:null,swGroupId:null,swGroups:null,swIds:{},mode:"direct",hub:null,warn:""};
+  if(!NEW||NEW.gid!==GID)NEW={gid:GID,cur:ls.get("su_cur_"+GID,"VND"),rates:{},name:"",note:"",source:"blank",crowd:new Map(G.members.map(m=>[m.id,1])),typed:"",draft:null,swGroupId:null,swGroups:null,swIds:{},mode:"direct",hub:null,warn:""};
   const N=NEW;
   if(N.source==="paste"&&N.typed.trim())readPaste();
   const srcBtn=(k,l)=>`<button type="button" data-src="${k}" class="${N.source===k?"on":""}">${l}</button>`;
@@ -880,16 +1021,19 @@ function viewNew(){
   let preview="";
   const d=N.draft;
   if(d&&d.exps.length&&N.source!=="blank"){
-    const bal=cleanBal(sumNets(d.exps)),names=Object.keys(bal);
+    const need=missingRates(d.exps,N);
+    if(need.length&&!N.fetching){N.fetching=true;fillRates(N,need).catch(e=>{N.warn="Couldn't get exchange rates: "+e.message}).finally(()=>{N.fetching=false;if(NEW===N&&location.pathname.endsWith("/new"))viewNew()})}
+    const bal=cleanBal(sumNets(d.exps,N)),names=Object.keys(bal),M=n=>money(n,N.cur);
     if(N.hub&&!names.includes(N.hub))N.hub=null;
     if(N.mode==="hub"&&!N.hub)N.hub=(me()&&names.includes(me().name)?me().name:names.sort((a,b)=>bal[b]-bal[a])[0]);
     const plan=makePlan(bal,N.mode,N.hub);
     const per={};plan.forEach(p=>per[p.from]=(per[p.from]||0)+1);
-    const spent=costTotal(d.exps);
-    preview=`<div class="card"><h2>${d.exps.length} cost${d.exps.length>1?"s":""}${spent?` · ${vnd(spent)}`:""}</h2>
-      ${d.exps.slice(0,6).map(x=>`<div class="mini"><div class="grow">${esc(x.desc)}<div class="muted">${esc(splitLabel(x,n=>n))}</div></div><span class="amt">${x.kind==="net"?"":vnd(x.amt)}</span></div>`).join("")}
+    const spent=costTotal(d.exps,N);
+    preview=`<div class="card"><h2>${d.exps.length} cost${d.exps.length>1?"s":""}${spent?` · ${M(spent)}`:""}</h2>
+      ${need.length?`<p class="muted" style="margin-top:0">Getting exchange rates for ${need.join(", ")}…</p>`:""}
+      ${d.exps.slice(0,6).map(x=>`<div class="mini"><div class="grow">${esc(x.desc)}<div class="muted">${esc(splitLabel(x,n=>n))}</div></div><span class="amt">${x.kind==="net"?"":money(x.amt,xCur(x,N))}</span></div>`).join("")}
       ${d.exps.length>6?`<div class="muted" style="padding-top:6px">and ${d.exps.length-6} more. You can edit them all after creating.</div>`:""}</div>
-      <div class="card"><h2>Balances</h2>${names.sort((a,b)=>bal[b]-bal[a]).map(n=>`<div class="bal"><span>${esc(n)}${matchMember(n,N.swIds[n])?"":' <span class="pill grey">new</span>'}</span><span class="${bal[n]>0?"pos":"neg"}">${bal[n]>0?"gets ":"owes "}${vnd(Math.abs(bal[n]))}</span></div>`).join("")||'<div class="empty">Everyone is square.</div>'}
+      <div class="card"><h2>Balances</h2>${names.sort((a,b)=>bal[b]-bal[a]).map(n=>`<div class="bal"><span>${esc(n)}${matchMember(n,N.swIds[n])?"":' <span class="pill grey">new</span>'}</span><span class="${bal[n]>0?"pos":"neg"}">${bal[n]>0?"gets ":"owes "}${M(Math.abs(bal[n]))}</span></div>`).join("")||'<div class="empty">Everyone is square.</div>'}
         <label>How should people pay?</label><div class="seg"><button type="button" data-mode="direct" class="${N.mode==="direct"?"on":""}">Directly to each other</button><button type="button" data-mode="hub" class="${N.mode==="hub"?"on":""}">Through one person</button></div>
         ${N.mode==="hub"?`<select id="hub" style="margin-top:8px">${names.map(n=>`<option value="${esc(n)}" ${n===N.hub?"selected":""}>${esc(n)}</option>`).join("")}</select>`:""}
         ${plan.length?`<p class="muted">${plan.length} payment${plan.length>1?"s":""}; most anyone makes is ${Math.max(...Object.values(per))}.</p>`:""}</div>`;
@@ -898,15 +1042,18 @@ function viewNew(){
   $("#app").innerHTML=`
   ${header("New gathering",gpath(),"Cancel")}
   <div class="card"><label style="margin-top:0">Name</label><input id="nName" value="${esc(N.name)}" maxlength="60" placeholder="e.g. Steak night">
-    <label>Transfer note (shows in the bank app)</label><input id="nNote" value="${esc(N.note)}" maxlength="40" placeholder="Defaults to the name, without accents"></div>
+    <label>Settle up in</label><select id="nCur">${curOpts(N.cur)}</select>
+    <p class="muted" style="margin:6px 0 0">${N.cur==="VND"?"Paid back by VietQR bank transfer.":"Paid back by PayPal. Costs in other currencies are converted to "+N.cur+"."}</p>
+    ${N.cur==="VND"?`<label>Transfer note (shows in the bank app)</label><input id="nNote" value="${esc(N.note)}" maxlength="40" placeholder="Defaults to the name, without accents">`:""}</div>
   ${N.source==="blank"||N.source==="paste"?`<div class="card"><h2>Who's here?</h2><p class="muted" style="margin-top:0">Costs are shared between these people unless you say otherwise. Tap ×1 to make it ×2 for a couple.</p>${crowdHtml(N.crowd)}</div>`:""}
   <div class="card"><h2>Costs</h2><div class="seg" style="margin-bottom:12px">${srcBtn("blank","Add as you go")}${srcBtn("paste","Paste")}${srcBtn("csv","CSV")}${CONFIG.splitwise?srcBtn("sw","Splitwise"):""}</div>${src}
     ${N.warn?`<div class="warnbox">${esc(N.warn)}</div>`:""}</div>
   ${preview}
   <button class="btn primary block" id="create" ${canCreate?"":"disabled"}>Create gathering</button>`;
 
-  const keep=()=>{N.name=$("#nName").value;N.note=$("#nNote").value};
-  $("#nName").oninput=keep;$("#nNote").oninput=keep;
+  const keep=()=>{N.name=$("#nName").value;if($("#nNote"))N.note=$("#nNote").value};
+  $("#nName").oninput=keep;if($("#nNote"))$("#nNote").oninput=keep;
+  $("#nCur").onchange=()=>{keep();N.cur=$("#nCur").value;N.rates={};ls.set("su_cur_"+GID,N.cur);viewNew()};
   if($("#cwAll"))bindCrowd(N.crowd,()=>{keep();viewNew()});
   document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.draft=null;N.warn="";N.swGroupId=null;viewNew()});
   document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{keep();N.mode=b.dataset.mode;viewNew()});
@@ -922,18 +1069,20 @@ function viewNew(){
   const swl=$("#swload");if(swl)swl.onclick=()=>{keep();pinFlow(async pin=>{swl.disabled=true;try{N.swGroups=(await api("/api/splitwise/groups",{pin})).groups;if(!N.swGroups.length)N.warn="No Splitwise groups found."}catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");N.warn=e.message}viewNew()})};
   const swg=$("#swg");if(swg)swg.onchange=()=>{keep();if(!swg.value)return;pinFlow(async pin=>{
     try{const r=await api("/api/splitwise/groups/"+swg.value,{pin});N.swGroupId=r.id;if(!N.name)N.name=r.name;
-      N.warn=r.otherCurrencies.length?`This group also has ${r.otherCurrencies.join(", ")} balances. Only VND is brought in.`:"";
+      N.warn=r.unsupported&&r.unsupported.length?`This group also has ${r.unsupported.join(", ")} balances, which aren't supported here yet.`:"";
       N.swIds=Object.fromEntries(r.members.map(x=>[x.name,x.swId]));
-      const nets=roundBalances(Object.fromEntries(r.members.map(x=>[x.name,x.balance])));
-      N.draft=Object.keys(nets).length?{exps:[{id:newId(),kind:"net",desc:`Balances from Splitwise (${r.name})`,amt:0,nets,created:Date.now()}],people:r.members.map(x=>({name:x.name,w:1}))}:{exps:[],people:[]};
-      if(!Object.keys(nets).length)N.warn="Everyone in that Splitwise group is already square.";
+      const curs=r.currencies||["VND"],exps=[];
+      curs.forEach((c,i)=>{const nets=roundBalances(Object.fromEntries(r.members.map(x=>[x.name,((x.balances||{VND:x.balance})[c]||0)*10**D(c)])));
+        if(Object.keys(nets).length)exps.push({id:newId(),kind:"net",cur:c,desc:`Balances from Splitwise (${r.name}${curs.length>1?", "+c:""})`,amt:0,nets,created:Date.now()+i})});
+      N.draft={exps,people:r.members.map(x=>({name:x.name,w:1}))};
+      if(!exps.length)N.warn="Everyone in that Splitwise group is already square.";
     }catch(e){N.warn=e.message}viewNew()})};
   $("#create").onclick=()=>{keep();createGathering($("#create"))};
 }
 function readPaste(){
   const N=NEW;
   const crowd=[...N.crowd].map(([id,w])=>({name:nm(id),w}));
-  const r=parseCostsText(N.typed,crowd);
+  const r=parseCostsText(N.typed,crowd,N.cur);
   N.draft={exps:r.exps,people:r.people};
   N.warn=r.bad.length?`Couldn't read: ${r.bad.slice(0,3).join(" · ")}${r.bad.length>3?` (+${r.bad.length-3} more)`:""}`:"";
   if(!r.people&&!N.crowd.size&&r.exps.some(x=>x.kind==="split"))N.warn=(N.warn?N.warn+" ":"")+"Tick who's here, or add a People: line.";
@@ -958,8 +1107,10 @@ async function createGathering(btn){
       if(N.mode==="hub"&&N.hub)hub=ids[N.hub]||null;
     }
     const mode=N.mode==="hub"&&hub?"hub":"direct";
-    const payments=planOf({expenses,payments:[],mode,hub});
-    const r=await api(`/api/g/${GID}/events`,{method:"POST",body:{name:N.name.trim(),note:cleanNote(N.note||N.name),mode,hub,people,expenses,payments,source:N.source,swGroupId:N.swGroupId}});
+    const ctx={cur:N.cur,rates:{...N.rates},expenses,payments:[],mode,hub};
+    try{await fillRates(ctx,expenses.map(x=>xCur(x,ctx)))}catch(e){}
+    const payments=planOf(ctx);
+    const r=await api(`/api/g/${GID}/events`,{method:"POST",body:{name:N.name.trim(),cur:N.cur,rates:ctx.rates,note:N.cur==="VND"?cleanNote(N.note||N.name):"",mode,hub,people,expenses,payments,source:N.source,swGroupId:N.swGroupId}});
     apply(r);NEW=null;go(gpath("/e/"+r.event.id),true);
   }catch(e){toast(e.message);btn.disabled=false}
 }
