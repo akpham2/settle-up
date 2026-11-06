@@ -358,7 +358,7 @@ function tabs(on){
 function viewHome(){
   const rec=ls.get("su_groups",[]);
   $("#app").innerHTML=`
-  <div class="hero"><h1>Settle Up</h1><p class="muted" style="font-size:15px">Split the bill in Splitwise, then pay each other back with VietQR. Scan, confirm, done.</p></div>
+  <div class="hero"><h1>Settle Up</h1><p class="muted" style="font-size:15px">Track shared costs, split them fairly, and pay each other back with VietQR or PayPal. Scan, confirm, done.</p></div>
   ${rec.length?`<div class="card"><h2>Your groups</h2><div class="list">${rec.map(g=>`<a class="item" href="/g/${esc(g.id)}" data-go><div class="info"><div class="t">${esc(g.name)}</div></div><span class="muted">›</span></a>`).join("")}</div></div>`:""}
   <div class="card"><h2>Start a group</h2>
     <p class="muted" style="margin:0">One group per circle of friends. Reuse it for every gathering.</p>
@@ -476,7 +476,7 @@ function memberSheet(id,isSelf,after){
   const x=id?mem(id):{name:"",bin:"970407",acc:"",holder:""};
   const known=BANKS.some(b=>b[1]===x.bin);
   openSheet(`<h2>${id?"Edit "+esc(x.name):isSelf?"Add yourself":"Add person"}</h2>
-    <label>Name (same as in Splitwise helps)</label><input id="mName" value="${esc(x.name)}" maxlength="60" placeholder="Anh Pham">
+    <label>Name</label><input id="mName" value="${esc(x.name)}" maxlength="60" placeholder="Anh Pham">
     <div class="sec" style="margin-top:16px">Vietnam bank · for VND (VietQR)</div>
     <label style="margin-top:0">Bank</label><select id="mBank">${BANKS.map(([n,b])=>`<option value="${b}" ${b===x.bin?"selected":""}>${esc(n)}</option>`).join("")}<option value="other" ${x.bin&&!known?"selected":""}>Other bank (enter BIN)…</option></select>
     <div id="mBinW" style="display:${x.bin&&!known?"block":"none"}"><label>Bank BIN (6 digits)</label><input id="mBin" inputmode="numeric" maxlength="6" value="${esc(known?"":x.bin||"")}"></div>
