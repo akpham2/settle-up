@@ -1,7 +1,6 @@
-// Settle Up — Cloudflare Worker + Durable Object
+// Settle Up — Cloudflare Worker + Durable Object (shared costs, VietQR / PayPal payback)
 // Serves the API under /api/*. The UI (public/index.html) is served by Workers Static Assets.
 
-const SW_BASE = "https://secure.splitwise.com/api/v3.0";
 // Supported currencies and their minor-unit decimals. Amounts are stored as integers in minor units.
 const CUR = { VND: 0, AUD: 2, USD: 2, NZD: 2, EUR: 2, GBP: 2, SGD: 2, CAD: 2, HKD: 2, THB: 2, JPY: 0, KRW: 0 };
 const cur = (v, d = "VND") => (Object.hasOwn(CUR, v) ? v : d);
@@ -25,14 +24,6 @@ function rid(len = 10) {
   const bytes = crypto.getRandomValues(new Uint8Array(len));
   return Array.from(bytes, (b) => abc[b % abc.length]).join("");
 }
-function safeEqual(a, b) {
-  a = String(a || ""); b = String(b || "");
-  if (!a || !b || a.length !== b.length) return false;
-  let r = 0;
-  for (let i = 0; i < a.length; i++) r |= a.charCodeAt(i) ^ b.charCodeAt(i);
-  return r === 0;
-}
-
 /* ---------------- validation of gathering data ---------------- */
 function cleanRates(r, base) {
   const out = {};
@@ -112,7 +103,7 @@ export class Group {
 
     if (parts[0] === "init" && method === "POST") {
       if (s) return json({ error: "exists" }, 409);
-      s = { name: str(body.name, 60) || "Our group", created: Date.now(), swGroupId: null, members: [], events: [] };
+      s = { name: str(body.name, 60) || "Our group", created: Date.now(), members: [], events: [] };
       await this.storage.put("state", s);
       return json(s);
     }
@@ -126,7 +117,6 @@ export class Group {
     // POST /group {name}
     if (a === "group" && method === "POST") {
       if (body.name !== undefined) s.name = str(body.name, 60) || s.name;
-      if (body.swGroupId !== undefined) s.swGroupId = body.swGroupId ? digits(body.swGroupId, 20) : null;
       return save();
     }
 
@@ -147,7 +137,6 @@ export class Group {
         if (m.bin !== undefined) ex.bin = digits(m.bin, 6);
         if (m.acc !== undefined) ex.acc = acct(m.acc);
         if (m.holder !== undefined) ex.holder = str(m.holder, 60).toUpperCase();
-        if (m.swId !== undefined) ex.swId = m.swId ? digits(m.swId, 20) : null;
         if (m.paypal !== undefined) ex.paypal = String(m.paypal ?? "").trim().replace(/^https?:\/\//i, "").replace(/^(www\.)?paypal\.me\//i, "").replace(/[^A-Za-z0-9@._+\-]/g, "").slice(0, 80);
         ex.updated = Date.now();
         out.push(ex);
@@ -164,7 +153,7 @@ export class Group {
       return save();
     }
 
-    // POST /events  {name, note, mode, hub, people, expenses, payments, swGroupId}
+    // POST /events  {name, note, cur, rates, mode, hub, people, expenses, payments}
     if (a === "events" && method === "POST" && !b) {
       if (s.events.length >= LIMITS.events) return json({ error: "Too many gatherings; delete some old ones" }, 400);
       const ids = new Set(s.members.map((m) => m.id));
@@ -183,7 +172,6 @@ export class Group {
         cur: cur(body.cur),
         hub: ids.has(body.hub) ? body.hub : null,
         source: str(body.source, 20),
-        swGroupId: body.swGroupId ? digits(body.swGroupId, 20) : null,
         created: Date.now(),
         payments,
       };
@@ -247,93 +235,8 @@ export class Group {
       p.paidAt = p.paid ? Date.now() : null;
       return save();
     }
-    // POST /events/:id/recorded {pid, swExpenseId}
-    if (ev && c === "recorded" && method === "POST") {
-      const p = ev.payments.find((x) => x.id === body.pid);
-      if (!p) return json({ error: "Payment not found" }, 404);
-      p.swExpenseId = digits(body.swExpenseId, 20) || null;
-      return save();
-    }
     return json({ error: "Unknown request" }, 404);
   }
-}
-
-/* ---------------- Splitwise ---------------- */
-async function sw(env, path, init = {}) {
-  const res = await fetch(SW_BASE + path, {
-    ...init,
-    headers: { Authorization: "Bearer " + env.SPLITWISE_API_KEY, "content-type": "application/json", ...(init.headers || {}) },
-  });
-  const text = await res.text();
-  let data;
-  try { data = JSON.parse(text); } catch { data = { raw: text.slice(0, 200) }; }
-  if (!res.ok) throw new Error(`Splitwise ${res.status}: ${JSON.stringify(data).slice(0, 200)}`);
-  return data;
-}
-const swName = (u) => [u.first_name, u.last_name].filter(Boolean).join(" ").trim() || "User " + u.id;
-
-async function handleSplitwise(request, env, rest) {
-  if (!env.SPLITWISE_API_KEY) return json({ error: "Splitwise isn't set up on this server" }, 400);
-  if (!env.ORGANIZER_PIN) return json({ error: "Set ORGANIZER_PIN on the server to use Splitwise" }, 400);
-  if (!safeEqual(request.headers.get("x-organizer-pin"), env.ORGANIZER_PIN))
-    return json({ error: "Wrong organizer PIN" }, 401);
-
-  // GET /api/splitwise/groups
-  if (rest === "/groups" && request.method === "GET") {
-    const d = await sw(env, "/get_groups");
-    const groups = (d.groups || [])
-      .filter((g) => g.id !== 0) // 0 = "non-group expenses"
-      .map((g) => ({ id: String(g.id), name: g.name, members: (g.members || []).length, updated: g.updated_at }));
-    return json({ groups });
-  }
-  // GET /api/splitwise/groups/:id  -> members with VND net balances
-  let m = rest.match(/^\/groups\/(\d{1,20})$/);
-  if (m && request.method === "GET") {
-    const d = await sw(env, "/get_group/" + m[1]);
-    const g = d.group;
-    if (!g) return json({ error: "Splitwise group not found" }, 404);
-    const currencies = new Set();
-    const members = (g.members || []).map((u) => {
-      const balances = {};
-      for (const b of u.balance || []) {
-        currencies.add(b.currency_code);
-        if (Object.hasOwn(CUR, b.currency_code)) balances[b.currency_code] = (balances[b.currency_code] || 0) + (Number(b.amount) || 0);
-      }
-      return { swId: String(u.id), name: swName(u), balance: balances.VND || 0, balances };
-    });
-    const unsupported = [...currencies].filter((c) => !Object.hasOwn(CUR, c));
-    return json({ id: String(g.id), name: g.name, members, currencies: [...currencies].filter((c) => Object.hasOwn(CUR, c)), unsupported, otherCurrencies: unsupported });
-  }
-  // POST /api/splitwise/payment {swGroupId, fromSwId, toSwId, amount, description}
-  if (rest === "/payment" && request.method === "POST") {
-    const b = await request.json().catch(() => ({}));
-    const amount = int(b.amount);
-    const groupId = digits(b.swGroupId, 20), from = digits(b.fromSwId, 20), to = digits(b.toSwId, 20);
-    if (!amount || !groupId || !from || !to) return json({ error: "Missing payment details" }, 400);
-    const c = cur(b.currency);
-    const cost = (amount / 10 ** CUR[c]).toFixed(2);
-    const d = await sw(env, "/create_expense", {
-      method: "POST",
-      body: JSON.stringify({
-        cost,
-        description: str(b.description, 60) || "Settle up (VietQR)",
-        payment: true,
-        currency_code: c,
-        group_id: Number(groupId),
-        users__0__user_id: Number(from),
-        users__0__paid_share: cost,
-        users__0__owed_share: "0.00",
-        users__1__user_id: Number(to),
-        users__1__paid_share: "0.00",
-        users__1__owed_share: cost,
-      }),
-    });
-    const errs = d.errors && Object.keys(d.errors).length ? d.errors : null;
-    if (errs) return json({ error: "Splitwise said: " + JSON.stringify(errs).slice(0, 200) }, 400);
-    const exp = (d.expenses || [])[0];
-    return json({ ok: true, expenseId: exp ? String(exp.id) : null });
-  }
-  return json({ error: "Unknown Splitwise request" }, 404);
 }
 
 /* ---------------- router ---------------- */
@@ -342,9 +245,6 @@ export default {
     const url = new URL(request.url);
     const p = url.pathname;
     try {
-      if (p === "/api/config" && request.method === "GET")
-        return json({ splitwise: !!(env.SPLITWISE_API_KEY && env.ORGANIZER_PIN) });
-
       // GET /api/rates?base=AUD -> { base, date, rates: { USD: <AUD per 1 USD>, ... } }
       if (p === "/api/rates" && request.method === "GET") {
         const base = cur(url.searchParams.get("base"), "");
@@ -381,8 +281,6 @@ export default {
         if (!["GET", "DELETE"].includes(request.method)) init.body = await request.text();
         return stub.fetch("https://group" + (gm[2] || "/state"), init);
       }
-
-      if (p.startsWith("/api/splitwise")) return await handleSplitwise(request, env, p.slice("/api/splitwise".length));
 
       if (p.startsWith("/api/")) return json({ error: "Not found" }, 404);
       // Anything else: let static assets (SPA) handle it.

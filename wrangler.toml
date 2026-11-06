@@ -17,7 +17,3 @@ class_name = "Group"
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["Group"]
-
-# Secrets (set with `npx wrangler secret put NAME`, never put them in this file):
-#   SPLITWISE_API_KEY  your personal Splitwise API key
-#   ORGANIZER_PIN      a PIN you choose; needed to pull from / record into Splitwise

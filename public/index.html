@@ -270,32 +270,6 @@ function settleHub(bal,hub){
   return out.sort((a,b)=>(a.to===hub?0:1)-(b.to===hub?0:1)||b.amt-a.amt);
 }
 
-/* ---------- CSV ---------- */
-function parseCSV(text){
-  const rows=[];let row=[],f="",q=false;
-  text=text.replace(/^﻿/,"");
-  for(let i=0;i<text.length;i++){const ch=text[i];
-    if(q){if(ch==='"'){if(text[i+1]==='"'){f+='"';i++}else q=false}else f+=ch}
-    else if(ch==='"')q=true;else if(ch===","){row.push(f);f=""}
-    else if(ch==="\n"||ch==="\r"){if(ch==="\r"&&text[i+1]==="\n")i++;row.push(f);rows.push(row);row=[];f=""}
-    else f+=ch}
-  if(f||row.length){row.push(f);rows.push(row)}
-  return rows.filter(r=>r.some(c=>c.trim()));
-}
-// Splitwise group export -> {name: balance}
-function splitwiseCsvBalances(text){
-  const rows=parseCSV(text);const h=rows[0]||[];
-  const ci=h.findIndex(x=>x.trim().toLowerCase()==="currency");
-  if(ci<0||h.length<=ci+1)throw new Error("This doesn't look like a Splitwise export");
-  const names=h.slice(ci+1).map(s=>s.trim());
-  const total=rows.find(r=>(r[1]||"").trim().toLowerCase()==="total balance");
-  const bal={};names.forEach(n=>bal[n]=0);
-  const cur=new Set();
-  if(total){names.forEach((n,i)=>bal[n]=parseFloat(total[ci+1+i])||0);cur.add((total[ci]||"").trim())}
-  else rows.slice(1).forEach(r=>{cur.add((r[ci]||"").trim());names.forEach((n,i)=>bal[n]+=parseFloat(r[ci+1+i])||0)});
-  return {bal,currencies:[...cur].filter(Boolean)};
-}
-
 /* =========================================================
    API
    ========================================================= */
@@ -305,7 +279,7 @@ async function api(path,opts={}){
   if(!res.ok)throw new Error(d.error||("Error "+res.status));
   return d;
 }
-let G=null,GID=null,CONFIG={splitwise:false};
+let G=null,GID=null;
 const me=()=>G&&G.members.find(m=>m.id===ls.get("su_me_"+GID,null));
 const mem=id=>G&&G.members.find(m=>m.id===id);
 const nm=id=>(mem(id)||{name:"?"}).name;
@@ -517,7 +491,6 @@ function messageFor(ev,p){
     `Or transfer manually: ${bankName(t.bin)} · ${t.acc}${t.holder?" · "+t.holder:""}${note?"\nNote: "+note:""}`,``,
     `All payments for this gathering: ${link}`].join("\n");
 }
-const canRecord=(ev,p)=>!!(ev.swGroupId&&CONFIG.splitwise&&p.paid&&!p.swExpenseId&&(mem(p.from)||{}).swId&&(mem(p.to)||{}).swId);
 function payCard(ev,p,role){
   const mine=role==="out",incoming=role==="in";
   const f=mem(p.from),t=mem(p.to),c=evCur(ev),note=ev.note||cleanNote(ev.name);
@@ -535,13 +508,12 @@ function payCard(ev,p,role){
     if(!mine&&!p.paid)btns+=`<button class="btn small" data-msg="${p.id}">Copy message</button>`;
     if(!incoming)btns+=`<button class="btn small" data-acc="${p.id}">${c==="VND"?"Copy acct #":pl?"Copy link":"Copy email"}</button>`;
   }
-  const sw=canRecord(ev,p);
   return `<div class="pay ${p.paid?"paid":""}"><div class="hd"><div class="who">${mine?"You → "+esc(t.name):incoming?esc(f.name)+" → you":esc(f.name)+" → "+esc(t.name)}</div><div class="money">${money(p.amt,c)}</div></div>${body}
     <div class="btns">${btns}
     <button class="btn small" data-paid="${p.id}">${p.paid?"Undo paid":(mine?"I've paid ✓":incoming?"Got it ✓":"Mark paid ✓")}</button>
-    ${sw?`<button class="btn small ghost" data-sw="${p.id}">Record in Splitwise</button>`:""}${p.swExpenseId?`<span class="pill" style="align-self:center">In Splitwise</span>`:""}</div></div>`;
+    </div></div>`;
 }
-/* ---------- ledger maths (Splitwise-style) ---------- */
+/* ---------- ledger maths ---------- */
 const isLedger=ev=>Array.isArray(ev&&ev.expenses);
 const newId=()=>Array.from(crypto.getRandomValues(new Uint8Array(8)),b=>"abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"[b%55]).join("");
 // Split amt by shares into whole đồng; leftover đồng go to the largest fractions (stable order).
@@ -646,7 +618,7 @@ function expenseSheet(ev,orig){
   const usedCurs=[...new Set([evCur(ev),...ev.expenses.map(x=>xCur(x,ev))])];
   if(E.kind==="net"){
     const nets=Object.entries(E.nets).sort((a,b)=>b[1]-a[1]);
-    openSheet(`<h2>${esc(E.desc)}</h2><p class="muted" style="margin-top:0">Balances imported from Splitwise. They can't be edited here, only removed.</p>
+    openSheet(`<h2>${esc(E.desc)}</h2><p class="muted" style="margin-top:0">Imported balances. They can't be edited, only removed.</p>
       ${nets.map(([id,v])=>`<div class="bal"><span>${esc(nm(id))}</span><span class="${v>0?"pos":"neg"}">${v>0?"gets ":"owes "}${money(Math.abs(v),xCur(E,ev))}</span></div>`).join("")}
       <div class="btns"><button class="btn" data-close>Close</button><button class="btn ghost danger" id="xDel" style="margin-left:auto">Remove</button></div>`);
     $("#xDel").onclick=()=>deleteExpense(ev,E);return;
@@ -830,7 +802,6 @@ function viewEvent(eid){
       viewEvent(eid);
     }catch(e){toast(e.message);b.disabled=false}
   });
-  document.querySelectorAll("[data-sw]").forEach(b=>b.onclick=()=>recordInSplitwise(ev,byId(b.dataset.sw)));
   document.querySelectorAll("[data-big]").forEach(b=>b.onclick=()=>{
     const p=byId(b.dataset.big),t=mem(p.to);
     $("#bigQr").innerHTML=qrFor(t,p.amt,ev.note||cleanNote(ev.name),C);
@@ -879,24 +850,8 @@ function viewEvent(eid){
     $("#dok").onclick=async()=>{try{apply(await api(`/api/g/${GID}/events/${eid}`,{method:"DELETE"}));go(gpath(),true)}catch(e){toast(e.message)}};
   };
 }
-function pinFlow(cb){
-  const pin=ls.get("su_pin","");if(pin)return cb(pin);
-  openSheet(`<h2>Organizer PIN</h2><p class="muted" style="margin-top:0">Splitwise access is limited to the organizer.</p><input id="pin" type="password" inputmode="numeric" autocomplete="off"><div class="btns"><button class="btn primary" id="pinok">Continue</button><button class="btn" data-close>Cancel</button></div>`);
-  $("#pinok").onclick=()=>{const v=$("#pin").value.trim();if(!v)return;ls.set("su_pin",v);closeSheet();cb(v)};
-}
-function recordInSplitwise(ev,p){
-  pinFlow(async pin=>{
-    try{
-      const d=await api("/api/splitwise/payment",{method:"POST",pin,body:{swGroupId:ev.swGroupId,fromSwId:mem(p.from).swId,toSwId:mem(p.to).swId,amount:p.amt,currency:evCur(ev),description:`Settle up · ${ev.name}`}});
-      apply(await api(`/api/g/${GID}/events/${ev.id}/recorded`,{method:"POST",body:{pid:p.id,swExpenseId:d.expenseId||"1"}}));
-      toast("Recorded in Splitwise");viewEvent(ev.id);
-    }catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");toast(e.message)}
-  });
-}
-
-/* ---------- names, parsing and imports ---------- */
-function matchMember(name,swId){
-  if(swId){const m=G.members.find(x=>x.swId===swId);if(m)return m}
+/* ---------- names and parsing ---------- */
+function matchMember(name){
   const n=strip(name).toLowerCase().replace(/\s+/g," ").trim();
   return G.members.find(x=>strip(x.name).toLowerCase().replace(/\s+/g," ").trim()===n)||null;
 }
@@ -955,15 +910,11 @@ function parseCostsText(text,crowd,defCur="VND"){
   return {exps,people,bad};
 }
 const namesIn=exps=>[...new Set(exps.flatMap(x=>x.kind==="net"?Object.keys(x.nets):[x.payer,...x.parts.map(p=>p.id)]))];
-async function resolveNames(names,swIds={}){
-  const map={},create=[],link=[];
-  for(const n of names){
-    const m=matchMember(n,swIds[n]);
-    if(m){map[n]=m.id;if(swIds[n]&&m.swId!==swIds[n])link.push({...m,swId:swIds[n]})}
-    else if(!create.includes(n))create.push(n);
-  }
-  if(create.length||link.length){
-    const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{members:[...create.map(n=>({name:n,swId:swIds[n]||undefined})),...link]}});
+async function resolveNames(names){
+  const map={},create=[];
+  for(const n of names){const m=matchMember(n);if(m)map[n]=m.id;else if(!create.includes(n))create.push(n)}
+  if(create.length){
+    const d=await api(`/api/g/${GID}/members`,{method:"POST",body:{members:create.map(name=>({name}))}});
     apply(d);create.forEach((n,i)=>map[n]=d.members[i].id);
   }
   return map;
@@ -972,39 +923,10 @@ function mapExpense(x,ids){
   if(x.kind==="net")return {...x,nets:Object.fromEntries(Object.entries(x.nets).map(([k,v])=>[ids[k],v]))};
   return {...x,payer:ids[x.payer],parts:x.parts.map(p=>({...p,id:ids[p.id]}))};
 }
-// Splitwise "Export as spreadsheet" -> one cost per row (exact amounts when one person paid)
-function csvToDraft(text){
-  const rows=parseCSV(text),h=rows[0]||[];
-  const ci=h.findIndex(x=>x.trim().toLowerCase()==="currency");
-  if(ci<0||h.length<=ci+1)throw new Error("This doesn't look like a Splitwise export");
-  const names=h.slice(ci+1).map(s=>s.trim());
-  const exps=[],cur=new Set(),t0=Date.now();
-  for(const r of rows.slice(1)){
-    const desc=(r[1]||"").trim();
-    if(!desc||/^total balance$/i.test(desc))continue;
-    const c=CURRENCIES[(r[ci]||"").trim().toUpperCase()]?(r[ci]||"").trim().toUpperCase():"VND";cur.add(c);
-    const f=10**D(c);
-    const cost=Math.round((parseFloat(r[3])||0)*f);
-    const vals=names.map((n,i)=>(parseFloat(r[ci+1+i])||0)*f);
-    if(!vals.some(v=>Math.abs(v)>=0.5))continue;
-    const pos=names.filter((n,i)=>vals[i]>=0.5);
-    if(pos.length===1&&cost>0){
-      const payer=pos[0],parts=[];let sum=0;
-      names.forEach((n,i)=>{if(n!==payer&&vals[i]<=-0.5){const a=Math.round(-vals[i]);parts.push({id:n,amt:a});sum+=a}});
-      const own=cost-sum;
-      if(own>=0){if(own>0)parts.push({id:payer,amt:own});exps.push({id:newId(),kind:"exact",cur:c,desc,amt:cost,payer,parts,created:t0+exps.length});continue}
-    }
-    const nets=roundBalances(Object.fromEntries(names.map((n,i)=>[n,vals[i]])));
-    if(Object.keys(nets).length)exps.push({id:newId(),kind:"net",cur:c,desc,amt:cost,nets,created:t0+exps.length});
-  }
-  if(!exps.length)throw new Error("No costs found in this file");
-  return {exps,people:names.map(name=>({name,w:1})),currencies:[...cur]};
-}
-
 /* ---------- new gathering ---------- */
 let NEW=null;
 function viewNew(){
-  if(!NEW||NEW.gid!==GID)NEW={gid:GID,cur:ls.get("su_cur_"+GID,"VND"),rates:{},name:"",note:"",source:"blank",crowd:new Map(G.members.map(m=>[m.id,1])),typed:"",draft:null,swGroupId:null,swGroups:null,swIds:{},mode:"direct",hub:null,warn:""};
+  if(!NEW||NEW.gid!==GID)NEW={gid:GID,cur:ls.get("su_cur_"+GID,"VND"),rates:{},name:"",note:"",source:"blank",crowd:new Map(G.members.map(m=>[m.id,1])),typed:"",draft:null,mode:"direct",hub:null,warn:""};
   const N=NEW;
   if(N.source==="paste"&&N.typed.trim())readPaste();
   const srcBtn=(k,l)=>`<button type="button" data-src="${k}" class="${N.source===k?"on":""}">${l}</button>`;
@@ -1014,10 +936,6 @@ function viewNew(){
       <textarea id="typed" style="min-height:160px" placeholder="Steak 2.75tr paid by Anh&#10;Pizza 764k paid by Hoa&#10;Beer 438k paid by Huy for Anh, Nolan x2, Huy&#10;Nolan paid 124k for fruit&#10;Chau owes Hoa 50k"></textarea>
       <div class="btns"><button type="button" class="btn small" id="readTyped">Read it</button></div>
       <details class="muted" style="margin-top:8px"><summary>What can I write?</summary><div style="margin-top:6px"><i>Steak 2.75tr paid by Anh</i> splits between everyone here.<br><i>Beer 438k paid by Huy for Anh, Nolan x2</i> splits between those people only.<br><i>Anh paid 500k for taxi</i> also works.<br><i>Chau owes Hoa 50k</i> adds a direct debt.<br><i>People: Anh x2, Hoa, Huy</i> sets who's in.<br>Amounts: 350k, 1.2tr, 350.000, 350,000₫.</div></details>`;
-  else if(N.source==="csv")src=`<p class="muted" style="margin-top:0">From a Splitwise group: Settings → <i>Export as spreadsheet</i>. Each row becomes a cost you can edit.</p><input type="file" id="csv" accept=".csv,text/csv">`;
-  else if(!CONFIG.splitwise)src=`<p class="muted">Splitwise isn't connected on this server.</p>`;
-  else src=`<p class="muted" style="margin-top:0">Brings in the current balances of a Splitwise group. Organizer only.</p>
-      ${N.swGroups?`<select id="swg"><option value="">Choose a Splitwise group…</option>${N.swGroups.map(g=>`<option value="${g.id}" ${g.id===N.swGroupId?"selected":""}>${esc(g.name)} (${g.members})</option>`).join("")}</select>`:`<button type="button" class="btn small" id="swload">Load my Splitwise groups</button>`}`;
   let preview="";
   const d=N.draft;
   if(d&&d.exps.length&&N.source!=="blank"){
@@ -1033,7 +951,7 @@ function viewNew(){
       ${need.length?`<p class="muted" style="margin-top:0">Getting exchange rates for ${need.join(", ")}…</p>`:""}
       ${d.exps.slice(0,6).map(x=>`<div class="mini"><div class="grow">${esc(x.desc)}<div class="muted">${esc(splitLabel(x,n=>n))}</div></div><span class="amt">${x.kind==="net"?"":money(x.amt,xCur(x,N))}</span></div>`).join("")}
       ${d.exps.length>6?`<div class="muted" style="padding-top:6px">and ${d.exps.length-6} more. You can edit them all after creating.</div>`:""}</div>
-      <div class="card"><h2>Balances</h2>${names.sort((a,b)=>bal[b]-bal[a]).map(n=>`<div class="bal"><span>${esc(n)}${matchMember(n,N.swIds[n])?"":' <span class="pill grey">new</span>'}</span><span class="${bal[n]>0?"pos":"neg"}">${bal[n]>0?"gets ":"owes "}${M(Math.abs(bal[n]))}</span></div>`).join("")||'<div class="empty">Everyone is square.</div>'}
+      <div class="card"><h2>Balances</h2>${names.sort((a,b)=>bal[b]-bal[a]).map(n=>`<div class="bal"><span>${esc(n)}${matchMember(n)?"":' <span class="pill grey">new</span>'}</span><span class="${bal[n]>0?"pos":"neg"}">${bal[n]>0?"gets ":"owes "}${M(Math.abs(bal[n]))}</span></div>`).join("")||'<div class="empty">Everyone is square.</div>'}
         <label>How should people pay?</label><div class="seg"><button type="button" data-mode="direct" class="${N.mode==="direct"?"on":""}">Directly to each other</button><button type="button" data-mode="hub" class="${N.mode==="hub"?"on":""}">Through one person</button></div>
         ${N.mode==="hub"?`<select id="hub" style="margin-top:8px">${names.map(n=>`<option value="${esc(n)}" ${n===N.hub?"selected":""}>${esc(n)}</option>`).join("")}</select>`:""}
         ${plan.length?`<p class="muted">${plan.length} payment${plan.length>1?"s":""}; most anyone makes is ${Math.max(...Object.values(per))}.</p>`:""}</div>`;
@@ -1046,7 +964,7 @@ function viewNew(){
     <p class="muted" style="margin:6px 0 0">${N.cur==="VND"?"Paid back by VietQR bank transfer.":"Paid back by PayPal. Costs in other currencies are converted to "+N.cur+"."}</p>
     ${N.cur==="VND"?`<label>Transfer note (shows in the bank app)</label><input id="nNote" value="${esc(N.note)}" maxlength="40" placeholder="Defaults to the name, without accents">`:""}</div>
   ${N.source==="blank"||N.source==="paste"?`<div class="card"><h2>Who's here?</h2><p class="muted" style="margin-top:0">Costs are shared between these people unless you say otherwise. Tap ×1 to make it ×2 for a couple.</p>${crowdHtml(N.crowd)}</div>`:""}
-  <div class="card"><h2>Costs</h2><div class="seg" style="margin-bottom:12px">${srcBtn("blank","Add as you go")}${srcBtn("paste","Paste")}${srcBtn("csv","CSV")}${CONFIG.splitwise?srcBtn("sw","Splitwise"):""}</div>${src}
+  <div class="card"><h2>Costs</h2><div class="seg" style="margin-bottom:12px">${srcBtn("blank","Add as you go")}${srcBtn("paste","Paste costs")}</div>${src}
     ${N.warn?`<div class="warnbox">${esc(N.warn)}</div>`:""}</div>
   ${preview}
   <button class="btn primary block" id="create" ${canCreate?"":"disabled"}>Create gathering</button>`;
@@ -1055,28 +973,11 @@ function viewNew(){
   $("#nName").oninput=keep;if($("#nNote"))$("#nNote").oninput=keep;
   $("#nCur").onchange=()=>{keep();N.cur=$("#nCur").value;N.rates={};ls.set("su_cur_"+GID,N.cur);viewNew()};
   if($("#cwAll"))bindCrowd(N.crowd,()=>{keep();viewNew()});
-  document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.draft=null;N.warn="";N.swGroupId=null;viewNew()});
+  document.querySelectorAll("[data-src]").forEach(b=>b.onclick=()=>{keep();N.source=b.dataset.src;N.draft=null;N.warn="";viewNew()});
   document.querySelectorAll("[data-mode]").forEach(b=>b.onclick=()=>{keep();N.mode=b.dataset.mode;viewNew()});
   const hub=$("#hub");if(hub)hub.onchange=()=>{keep();N.hub=hub.value;viewNew()};
   const tx=$("#typed");if(tx){tx.value=N.typed;tx.oninput=()=>N.typed=tx.value}
   const rt=$("#readTyped");if(rt)rt.onclick=()=>{keep();N.typed=$("#typed").value;readPaste();if(!N.draft||!N.draft.exps.length)N.warn=N.warn||"Paste at least one cost.";viewNew()};
-  const csv=$("#csv");if(csv)csv.onchange=async()=>{keep();const f=csv.files[0];if(!f)return;
-    try{N.draft=csvToDraft(await f.text());N.swGroupId=null;
-      N.warn=N.draft.currencies.some(c=>c&&c!=="VND")?`This file has ${N.draft.currencies.join(", ")} amounts; they're treated as VND.`:"";
-      if(!N.name)N.name=f.name.replace(/\.csv$/i,"").replace(/_/g," ")}
-    catch(e){N.draft=null;N.warn=e.message}
-    viewNew()};
-  const swl=$("#swload");if(swl)swl.onclick=()=>{keep();pinFlow(async pin=>{swl.disabled=true;try{N.swGroups=(await api("/api/splitwise/groups",{pin})).groups;if(!N.swGroups.length)N.warn="No Splitwise groups found."}catch(e){if(/PIN/i.test(e.message))ls.set("su_pin","");N.warn=e.message}viewNew()})};
-  const swg=$("#swg");if(swg)swg.onchange=()=>{keep();if(!swg.value)return;pinFlow(async pin=>{
-    try{const r=await api("/api/splitwise/groups/"+swg.value,{pin});N.swGroupId=r.id;if(!N.name)N.name=r.name;
-      N.warn=r.unsupported&&r.unsupported.length?`This group also has ${r.unsupported.join(", ")} balances, which aren't supported here yet.`:"";
-      N.swIds=Object.fromEntries(r.members.map(x=>[x.name,x.swId]));
-      const curs=r.currencies||["VND"],exps=[];
-      curs.forEach((c,i)=>{const nets=roundBalances(Object.fromEntries(r.members.map(x=>[x.name,((x.balances||{VND:x.balance})[c]||0)*10**D(c)])));
-        if(Object.keys(nets).length)exps.push({id:newId(),kind:"net",cur:c,desc:`Balances from Splitwise (${r.name}${curs.length>1?", "+c:""})`,amt:0,nets,created:Date.now()+i})});
-      N.draft={exps,people:r.members.map(x=>({name:x.name,w:1}))};
-      if(!exps.length)N.warn="Everyone in that Splitwise group is already square.";
-    }catch(e){N.warn=e.message}viewNew()})};
   $("#create").onclick=()=>{keep();createGathering($("#create"))};
 }
 function readPaste(){
@@ -1097,7 +998,7 @@ async function createGathering(btn){
     else{
       const d=N.draft;
       const names=[...new Set([...(d.people||[]).map(p=>p.name),...namesIn(d.exps)])];
-      const ids=await resolveNames(names,N.swIds);
+      const ids=await resolveNames(names);
       expenses=d.exps.map(x=>mapExpense(x,ids));
       const pm=new Map();
       if(N.source==="paste"&&!d.people)[...N.crowd].forEach(([id,w])=>pm.set(id,w));
@@ -1110,7 +1011,7 @@ async function createGathering(btn){
     const ctx={cur:N.cur,rates:{...N.rates},expenses,payments:[],mode,hub};
     try{await fillRates(ctx,expenses.map(x=>xCur(x,ctx)))}catch(e){}
     const payments=planOf(ctx);
-    const r=await api(`/api/g/${GID}/events`,{method:"POST",body:{name:N.name.trim(),cur:N.cur,rates:ctx.rates,note:N.cur==="VND"?cleanNote(N.note||N.name):"",mode,hub,people,expenses,payments,source:N.source,swGroupId:N.swGroupId}});
+    const r=await api(`/api/g/${GID}/events`,{method:"POST",body:{name:N.name.trim(),cur:N.cur,rates:ctx.rates,note:N.cur==="VND"?cleanNote(N.note||N.name):"",mode,hub,people,expenses,payments,source:N.source}});
     apply(r);NEW=null;go(gpath("/e/"+r.event.id),true);
   }catch(e){toast(e.message);btn.disabled=false}
 }
@@ -1121,7 +1022,7 @@ function closeSheet(){$("#modal").classList.remove("on")}
 $("#modal").addEventListener("click",e=>{if(e.target.id==="modal")closeSheet()});
 $("#overlay").onclick=e=>{if(e.target.tagName!=="IMG")$("#overlay").classList.remove("on")};
 
-api("/api/config").then(c=>CONFIG=c).catch(()=>{}).finally(route);
+route();
 </script>
 </body>
 </html>
