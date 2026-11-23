@@ -131,7 +131,7 @@ function detectCur(t){
 function parseMoney(str,c){
   let t=String(str??"").replace(new RegExp(CUR_RE.source,"gi"),"").replace(/\$/g,"").replace(/\s/g,"").toLowerCase();
   if(!D(c))return parseAmount(t);
-  let mul=1;const m=t.match(/^(.*?)(k|m)$/);if(m){t=m[1];mul=m[2]==="k"?1e3:1e6}
+  let mul=1;const m=t.match(new RegExp("^(.*?\\d)("+AMT_UNITS+")$"));if(m){t=m[1];mul=unitMul(m[2])}
   if(!/^[\d.,]+$/.test(t))return 0;
   const ld=t.lastIndexOf("."),lc=t.lastIndexOf(","),seps=(t.match(/[.,]/g)||[]).length;
   let dec=Math.max(ld,lc);
@@ -146,14 +146,17 @@ async function copy(text,ok){
   try{await navigator.clipboard.writeText(text);toast(ok||"Copied")}
   catch(e){openSheet(`<h2>Copy this</h2><p class="muted" style="margin-top:0">Select the text and copy it.</p><textarea readonly style="min-height:220px">${esc(text)}</textarea><div class="btns"><button class="btn" data-close>Done</button></div>`);setTimeout(()=>$("#sheet textarea").select(),50)}
 }
+// Unit words for amounts (longest first so "million" isn't read as "m").
+const AMT_UNITS="nghìn|nghin|ngàn|ngan|thousands|thousand|ng|k|triệu|trieu|millions|million|mill|mil|mio|mn|tr|m|tỷ|tỉ|billions|billion|bil|bn|ty|ti|b";
+const unitMul=u=>/^(k|ng|thousand)/.test(u)?1e3:/^(tr|m)/.test(u)?1e6:1e9;
 // VND amounts. Accepts 350000, 350.000, 350,000, 350k, 2.75tr, 20,6tr (Vietnamese comma decimal),
 // 20tr6 / 2k5 (spoken style), 1,2 tỷ. Returns 0 for anything it can't read (never guesses).
 function parseAmount(s){
   if(s==null)return 0;
   const t=String(s).normalize("NFC").toLowerCase().replace(/\s|₫|vnđ|vnd|đồng|dong|đ/g,"");
   if(!t)return 0;
-  const U="(nghìn|nghin|ngàn|ngan|ng|k|triệu|trieu|tr|m|tỷ|tỉ|ty|ti|b)";
-  const mul=u=>/^(k|ng)/.test(u)?1e3:/^(tr|m)/.test(u)?1e6:1e9;
+  const U="("+AMT_UNITS+")";
+  const mul=unitMul;
   let m=t.match(new RegExp("^(\\d+(?:[.,]\\d+)?)"+U+"$"));
   if(m)return Math.round(parseFloat(m[1].replace(",","."))*mul(m[2]));
   m=t.match(new RegExp("^(\\d+)"+U+"(\\d{1,3})$"));
@@ -884,7 +887,7 @@ function parseList(str,known){
 // Text -> costs keyed by NAME (ids are filled in later by resolveNames/mapExpense).
 function parseCostsText(text,crowd,defCur="VND"){
   const CC="(?:VND|AUD|USD|NZD|EUR|GBP|SGD|CAD|HKD|THB|JPY|KRW)";
-  const AMT="((?:"+CC+"\\s?|US\\$|AU\\$|A\\$|NZ\\$|S\\$|C\\$|HK\\$|\\$|€|£|¥|₩|฿)?\\d[\\d.,]*\\s*(?:(?:nghìn|nghin|ngàn|k|triệu|trieu|tr|m|tỷ|tỉ|ty)(?:\\d{1,3})?)?\\s*(?:₫|đ|vnđ|"+CC+")?)";
+  const AMT="((?:"+CC+"\\s?|US\\$|AU\\$|A\\$|NZ\\$|S\\$|C\\$|HK\\$|\\$|€|£|¥|₩|฿)?\\d[\\d.,]*\\s*(?:(?:"+AMT_UNITS+")(?:\\d{1,3})?)?\\s*(?:₫|đ|vnđ|"+CC+")?)";
   const amtOf=t=>{const c=detectCur(t)||defCur;return {c,a:parseMoney(t,c)}};
   const reOwe=new RegExp("^(.+?) (?:owes?|nợ|no|->|→|=>) (.+?)\\s*[:\\-–]?\\s*(?:₫|đ|vnd)?\\s*"+AMT+"$","i");
   const rePaidBy=new RegExp("^(.*?)\\s*[:\\-–]?\\s*"+AMT+" (?:paid by|by|do|trả bởi|tra boi) (.+?)(?: (?:for|split|chia|cho) (.+))?$","i");
