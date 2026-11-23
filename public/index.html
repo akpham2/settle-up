@@ -146,13 +146,20 @@ async function copy(text,ok){
   try{await navigator.clipboard.writeText(text);toast(ok||"Copied")}
   catch(e){openSheet(`<h2>Copy this</h2><p class="muted" style="margin-top:0">Select the text and copy it.</p><textarea readonly style="min-height:220px">${esc(text)}</textarea><div class="btns"><button class="btn" data-close>Done</button></div>`);setTimeout(()=>$("#sheet textarea").select(),50)}
 }
+// VND amounts. Accepts 350000, 350.000, 350,000, 350k, 2.75tr, 20,6tr (Vietnamese comma decimal),
+// 20tr6 / 2k5 (spoken style), 1,2 tỷ. Returns 0 for anything it can't read (never guesses).
 function parseAmount(s){
   if(s==null)return 0;
-  const t=String(s).toLowerCase().replace(/\s|₫|vnd|vnđ|đ/g,"");
-  const m=t.match(/^(-?[\d.,]+)(k|ng|nghin|nghìn|tr|trieu|triệu|m)?$/);
-  if(!m){const d=t.replace(/[^\d-]/g,"");return d?parseInt(d,10)||0:0}
-  if(m[2]){const v=parseFloat(m[1].replace(",","."));return Math.round(v*(/^(k|ng)/.test(m[2])?1e3:1e6))}
-  return parseInt(m[1].replace(/[.,]/g,""),10)||0;
+  const t=String(s).normalize("NFC").toLowerCase().replace(/\s|₫|vnđ|vnd|đồng|dong|đ/g,"");
+  if(!t)return 0;
+  const U="(nghìn|nghin|ngàn|ngan|ng|k|triệu|trieu|tr|m|tỷ|tỉ|ty|ti|b)";
+  const mul=u=>/^(k|ng)/.test(u)?1e3:/^(tr|m)/.test(u)?1e6:1e9;
+  let m=t.match(new RegExp("^(\\d+(?:[.,]\\d+)?)"+U+"$"));
+  if(m)return Math.round(parseFloat(m[1].replace(",","."))*mul(m[2]));
+  m=t.match(new RegExp("^(\\d+)"+U+"(\\d{1,3})$"));
+  if(m)return Math.round(parseFloat(m[1]+"."+m[3])*mul(m[2]));
+  if(/^\d{1,3}([.,]\d{3})+$/.test(t)||/^\d+$/.test(t))return parseInt(t.replace(/[.,]/g,""),10)||0;
+  return 0;
 }
 
 /* ---------- VietQR (NAPAS / EMVCo) ---------- */
@@ -631,13 +638,13 @@ function expenseSheet(ev,orig){
     const on=id=>E.parts.find(p=>p.id===id);
     openSheet(`<h2>${orig?"Edit cost":"Add a cost"}</h2>
       <label style="margin-top:0">What for?</label><input id="xDesc" value="${esc(E.desc)}" maxlength="80" placeholder="e.g. Steak, beer, taxi">
-      <div class="row" style="gap:10px;align-items:flex-end"><div style="flex:0 0 96px"><label>Currency</label><select id="xCur">${curOpts(E.cur,usedCurs).replace(/ · [^<]+</g,"<")}</select></div><div class="grow"><label>Amount</label><input id="xAmt" inputmode="decimal" value="${fmtInput(E.amt,E.cur)}" placeholder="${D(E.cur)?"125.50":"2.75tr or 350k"}"></div></div>
+      <div class="row" style="gap:10px;align-items:flex-end"><div style="flex:0 0 96px"><label>Currency</label><select id="xCur">${curOpts(E.cur,usedCurs).replace(/ · [^<]+</g,"<")}</select></div><div class="grow"><label>Amount</label><input id="xAmt" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="${fmtInput(E.amt,E.cur)}" placeholder="${D(E.cur)?"125.50":"350k, 2,75tr or 2.750.000"}"></div></div>
       <div class="row" style="gap:10px"><div class="grow"><label>Paid by</label><select id="xPayer">${[...cands.map(mem),...others].filter(Boolean).map(m=>`<option value="${m.id}" ${m.id===E.payer?"selected":""}>${esc(m.name)}</option>`).join("")}</select></div></div>
       <div class="muted" id="xAmtHint" style="margin-top:4px"></div>
       <label>Split</label><div class="seg"><button type="button" data-k="split" class="${E.kind==="split"?"on":""}">Equally / by shares</button><button type="button" data-k="exact" class="${E.kind==="exact"?"on":""}">Exact amounts</button></div>
       <div id="xRows" style="margin-top:6px">${cands.map(id=>{const p=on(id);return E.kind==="split"
         ?`<div class="mini"><label class="row grow" style="margin:0;color:var(--ink);font-size:15px;gap:10px"><input type="checkbox" data-on="${id}" ${p?"checked":""} style="width:20px;height:20px;flex:none"> <span>${esc(nm(id))}</span></label><input data-w="${id}" type="number" inputmode="decimal" min="0.5" max="20" step="0.5" value="${p?p.w:wOf(id)}" style="width:62px;padding:6px" ${p?"":"disabled"} aria-label="shares"><span class="amt" data-sh="${id}" style="min-width:92px;text-align:right"></span></div>`
-        :`<div class="mini"><div class="grow">${esc(nm(id))}</div><input data-ex="${id}" inputmode="decimal" value="${p&&p.amt?fmtInput(p.amt,E.cur):""}" placeholder="0" style="width:130px;padding:6px;text-align:right"></div>`}).join("")}</div>
+        :`<div class="mini"><div class="grow">${esc(nm(id))}</div><input data-ex="${id}" inputmode="text" autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false" value="${p&&p.amt?fmtInput(p.amt,E.cur):""}" placeholder="0" style="width:130px;padding:6px;text-align:right"></div>`}).join("")}</div>
       ${others.length?`<div class="row" style="margin-top:8px"><select id="xAddP" class="grow"><option value="">+ Someone else was in on this…</option>${others.map(m=>`<option value="${m.id}">${esc(m.name)}</option>`).join("")}</select></div>`:""}
       <div class="muted" id="xFoot" style="margin-top:8px"></div>
       <div class="btns"><button class="btn primary" id="xSave">Save</button><button class="btn" data-close>Cancel</button>${orig?`<button class="btn ghost danger" id="xDel" style="margin-left:auto">Delete</button>`:""}</div>`);
@@ -877,7 +884,7 @@ function parseList(str,known){
 // Text -> costs keyed by NAME (ids are filled in later by resolveNames/mapExpense).
 function parseCostsText(text,crowd,defCur="VND"){
   const CC="(?:VND|AUD|USD|NZD|EUR|GBP|SGD|CAD|HKD|THB|JPY|KRW)";
-  const AMT="((?:"+CC+"\\s?|US\\$|AU\\$|A\\$|NZ\\$|S\\$|C\\$|HK\\$|\\$|€|£|¥|₩|฿)?\\d[\\d.,]*\\s*(?:k|tr|triệu|trieu|m|nghìn|nghin)?\\s*(?:₫|đ|vnđ|"+CC+")?)";
+  const AMT="((?:"+CC+"\\s?|US\\$|AU\\$|A\\$|NZ\\$|S\\$|C\\$|HK\\$|\\$|€|£|¥|₩|฿)?\\d[\\d.,]*\\s*(?:(?:nghìn|nghin|ngàn|k|triệu|trieu|tr|m|tỷ|tỉ|ty)(?:\\d{1,3})?)?\\s*(?:₫|đ|vnđ|"+CC+")?)";
   const amtOf=t=>{const c=detectCur(t)||defCur;return {c,a:parseMoney(t,c)}};
   const reOwe=new RegExp("^(.+?) (?:owes?|nợ|no|->|→|=>) (.+?)\\s*[:\\-–]?\\s*(?:₫|đ|vnd)?\\s*"+AMT+"$","i");
   const rePaidBy=new RegExp("^(.*?)\\s*[:\\-–]?\\s*"+AMT+" (?:paid by|by|do|trả bởi|tra boi) (.+?)(?: (?:for|split|chia|cho) (.+))?$","i");
